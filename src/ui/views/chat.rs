@@ -7,7 +7,7 @@
 //! Chat View - AI interaction with Vision + Audio
 
 use crate::core::api::{groq::ImageData, GroqClient, WhisperClient};
-use crate::core::audio::AudioRecorder;
+use crate::core::audio::{AudioRecorder, ListenRecorder};
 use crate::core::capture;
 use crate::core::state::{AppState, Message};
 use gtk4::gio;
@@ -30,6 +30,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
 
     // Shared state
     let recorder = Rc::new(RefCell::new(AudioRecorder::new()));
+    let listener = Rc::new(RefCell::new(ListenRecorder::new()));
     let attached_image: Rc<RefCell<Option<ImageData>>> = Rc::new(RefCell::new(None));
 
     // Status label
@@ -146,6 +147,28 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         });
     }
 
+    // Listen button (system audio capture)
+    let listen_btn = Button::with_label("🎧 Listen");
+    listen_btn.set_tooltip_text(Some("Record system audio (what you hear)"));
+
+    {
+        let listener_c = listener.clone();
+        let state_c = state.clone();
+        let status_c = status_label.clone();
+        let listen_btn_c = listen_btn.clone();
+        let chat_view_c = chat_view.clone();
+
+        listen_btn.connect_clicked(move |_| {
+            handle_listen_click(
+                &listener_c,
+                &state_c,
+                &status_c,
+                &listen_btn_c,
+                &chat_view_c,
+            );
+        });
+    }
+
     // Screenshot button
     let screenshot_btn = Button::with_label("📷 Screenshot");
     screenshot_btn.set_tooltip_text(Some("Take screenshot and attach to chat"));
@@ -180,6 +203,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     }
 
     buttons_box.append(&audio_btn);
+    buttons_box.append(&listen_btn);
     buttons_box.append(&screenshot_btn);
     buttons_box.append(&clear_btn);
     vbox.append(&buttons_box);
@@ -247,6 +271,82 @@ fn handle_audio_click(
             Ok(()) => {
                 audio_btn.set_label("⏹️ Stop");
                 status_label.set_text("🔴 Recording...");
+                status_label.set_visible(true);
+            }
+            Err(e) => {
+                status_label.set_text(&format!("❌ {}", e));
+                status_label.set_visible(true);
+            }
+        }
+    }
+}
+
+fn handle_listen_click(
+    listener: &Rc<RefCell<ListenRecorder>>,
+    state: &Rc<RefCell<AppState>>,
+    status_label: &Label,
+    listen_btn: &Button,
+    chat_view: &TextView,
+) {
+    let is_listening = listener.borrow().is_listening();
+
+    if is_listening {
+        listen_btn.set_label("🎧 Listen");
+        status_label.set_text("⏳ Transcribing...");
+        status_label.set_visible(true);
+
+        let audio_path = match listener.borrow_mut().stop() {
+            Ok(path) => path,
+            Err(e) => {
+                status_label.set_text(&format!("❌ {}", e));
+                return;
+            }
+        };
+
+        let (stt_key, stt_model) = {
+            let s = state.borrow();
+            (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
+        };
+
+        if stt_key.is_empty() {
+            status_label.set_text("⚠️ Set STT API key in Settings");
+            return;
+        }
+
+        let status_c = status_label.clone();
+        let state_c = state.clone();
+        let chat_view_c = chat_view.clone();
+
+        glib::spawn_future_local(async move {
+            let result = gio::spawn_blocking(move || {
+                let client = WhisperClient::new(&stt_key, &stt_model);
+                client.transcribe(&audio_path).map_err(|e| e.to_string())
+            })
+            .await;
+
+            match result {
+                Ok(Ok(text)) => {
+                    // Add transcribed system audio to chat
+                    state_c.borrow_mut().current_messages.push(Message {
+                        role: "user".to_string(),
+                        content: format!("🎧 [Heard]: {}", text),
+                    });
+                    update_chat_display(&chat_view_c, &state_c.borrow());
+                    status_c.set_visible(false);
+                }
+                Ok(Err(e)) => {
+                    status_c.set_text(&format!("❌ {}", e));
+                }
+                Err(e) => {
+                    status_c.set_text(&format!("❌ Listen transcription failed: {:?}", e));
+                }
+            }
+        });
+    } else {
+        match listener.borrow_mut().start() {
+            Ok(()) => {
+                listen_btn.set_label("⏹️ Stop");
+                status_label.set_text("🎧 Listening to system audio...");
                 status_label.set_visible(true);
             }
             Err(e) => {
@@ -389,7 +489,7 @@ fn update_chat_display(chat_view: &TextView, state: &AppState) {
 
     if state.current_messages.is_empty() {
         buffer.set_text(
-            "Welcome to ShyQuiet!\n\n💬 Type a message\n🎤 Record audio\n📷 Attach screenshot",
+            "Welcome to ShyQuiet!\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n📷 Attach screenshot",
         );
         return;
     }
