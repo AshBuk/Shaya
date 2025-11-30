@@ -10,6 +10,7 @@ use crate::core::api::{groq::ImageData, GroqClient, WhisperClient};
 use crate::core::audio::AudioRecorder;
 use crate::core::capture;
 use crate::core::state::{AppState, Message};
+use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
@@ -18,8 +19,6 @@ use gtk4::{
 };
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::thread;
 
 /// Build the chat view
 pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
@@ -220,31 +219,26 @@ fn handle_audio_click(
             return;
         }
 
-        let (tx, rx) = mpsc::channel::<Result<String, String>>();
-
-        thread::spawn(move || {
-            let client = WhisperClient::new(&stt_key, &stt_model);
-            let _ = tx.send(client.transcribe(&audio_path).map_err(|e| e.to_string()));
-        });
-
         let status_c = status_label.clone();
         let entry_c = entry.clone();
 
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            match rx.try_recv() {
+        glib::spawn_future_local(async move {
+            let result = gio::spawn_blocking(move || {
+                let client = WhisperClient::new(&stt_key, &stt_model);
+                client.transcribe(&audio_path).map_err(|e| e.to_string())
+            })
+            .await;
+
+            match result {
                 Ok(Ok(text)) => {
                     entry_c.set_text(&text);
                     status_c.set_visible(false);
-                    glib::ControlFlow::Break
                 }
                 Ok(Err(e)) => {
                     status_c.set_text(&format!("❌ {}", e));
-                    glib::ControlFlow::Break
                 }
-                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                Err(_) => {
-                    status_c.set_text("❌ Transcription failed");
-                    glib::ControlFlow::Break
+                Err(e) => {
+                    status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
                 }
             }
         });
@@ -351,23 +345,22 @@ fn send_message(
     status_label.set_visible(true);
 
     let messages: Vec<Message> = state.borrow().current_messages.clone();
-    let (tx, rx) = mpsc::channel::<Result<String, String>>();
-
-    thread::spawn(move || {
-        let client = GroqClient::new(&api_key, &model);
-        let result = client
-            .chat_with_image(&messages, &system_prompt, attached.as_ref())
-            .map_err(|e| e.to_string());
-        let _ = tx.send(result);
-    });
 
     let state_c = state.clone();
     let chat_view_c = chat_view.clone();
     let status_c = status_label.clone();
     let send_btn_c = send_btn.clone();
 
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        match rx.try_recv() {
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(move || {
+            let client = GroqClient::new(&api_key, &model);
+            client
+                .chat_with_image(&messages, &system_prompt, attached.as_ref())
+                .map_err(|e| e.to_string())
+        })
+        .await;
+
+        match result {
             Ok(Ok(response)) => {
                 state_c.borrow_mut().current_messages.push(Message {
                     role: "assistant".to_string(),
@@ -376,19 +369,16 @@ fn send_message(
                 update_chat_display(&chat_view_c, &state_c.borrow());
                 status_c.set_visible(false);
                 send_btn_c.set_sensitive(true);
-                glib::ControlFlow::Break
             }
             Ok(Err(e)) => {
                 tracing::error!("API error: {}", e);
                 status_c.set_text(&format!("❌ {}", e));
                 send_btn_c.set_sensitive(true);
-                glib::ControlFlow::Break
             }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => {
+            Err(e) => {
+                tracing::error!("Task join error: {:?}", e);
                 status_c.set_text("❌ Request failed");
                 send_btn_c.set_sensitive(true);
-                glib::ControlFlow::Break
             }
         }
     });

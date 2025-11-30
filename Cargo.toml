@@ -33,10 +33,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 dirs = "5.0"
 
-# Async runtime
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-
-# HTTP client (AI/STT APIs)
+# HTTP client (AI/STT APIs) - blocking, wrapped in gio::spawn_blocking
 ureq = { version = "2.10", features = ["json"] }
 
 # Audio processing
