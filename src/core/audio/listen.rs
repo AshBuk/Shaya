@@ -140,17 +140,34 @@ impl ListenRecorder {
         Err("No monitor source found. Make sure audio is playing.".to_string())
     }
 
-    /// Find PipeWire monitor source
+    /// Find PipeWire monitor source (uses default sink's monitor)
     fn find_pipewire_monitor() -> Option<String> {
-        // Get default sink and construct monitor name
-        let output = Command::new("pw-cli").args(["info", "0"]).output().ok()?;
+        // Use wpctl to get default sink node name
+        let output = Command::new("wpctl")
+            .args(["inspect", "@DEFAULT_AUDIO_SINK@"])
+            .output()
+            .ok()?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Look for default audio sink
+        // Find node.name in wpctl output
+        for line in stdout.lines() {
+            if line.contains("node.name") {
+                if let Some(name) = line.split('=').nth(1) {
+                    let name = name.trim().trim_matches('"').trim();
+                    let monitor = format!("{}.monitor", name);
+                    tracing::info!("Found PipeWire default sink monitor: {}", monitor);
+                    return Some(monitor);
+                }
+            }
+        }
+
+        // Fallback: try pw-cli
+        let output = Command::new("pw-cli").args(["info", "0"]).output().ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
         for line in stdout.lines() {
             if line.contains("default.audio.sink") {
-                // Extract sink name and append .monitor
                 if let Some(name) = line.split('"').nth(1) {
                     let monitor = format!("{}.monitor", name);
                     tracing::info!("Found PipeWire monitor: {}", monitor);
@@ -159,24 +176,25 @@ impl ListenRecorder {
             }
         }
 
-        // Fallback: try to find any monitor node
-        let output = Command::new("pw-cli").args(["ls", "Node"]).output().ok()?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if line.contains("Monitor") || line.contains("monitor") {
-                if let Some(id) = line.split_whitespace().next() {
-                    tracing::info!("Found PipeWire monitor node: {}", id);
-                    return Some(id.to_string());
-                }
-            }
-        }
-
         None
     }
 
-    /// Find PulseAudio monitor source
+    /// Find PulseAudio monitor source (uses default sink's monitor)
     fn find_pulse_monitor() -> Option<String> {
+        // Get default sink first
+        let output = Command::new("pactl")
+            .args(["get-default-sink"])
+            .output()
+            .ok()?;
+
+        let default_sink = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !default_sink.is_empty() {
+            let monitor = format!("{}.monitor", default_sink);
+            tracing::info!("Using default sink monitor: {}", monitor);
+            return Some(monitor);
+        }
+
+        // Fallback: find first monitor source
         let output = Command::new("pactl")
             .args(["list", "short", "sources"])
             .output()
@@ -184,7 +202,6 @@ impl ListenRecorder {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        // Find first monitor source
         for line in stdout.lines() {
             if line.contains(".monitor") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
