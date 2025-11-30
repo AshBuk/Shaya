@@ -103,24 +103,7 @@ impl ListenRecorder {
     fn build_record_command(&self) -> Result<(&'static str, Vec<String>), String> {
         let output = self.output_path.to_string_lossy().to_string();
 
-        // Try PipeWire first
-        if Self::command_exists("pw-record") {
-            if let Some(monitor) = Self::find_pipewire_monitor() {
-                return Ok((
-                    "pw-record",
-                    vec![
-                        "--target".to_string(),
-                        monitor,
-                        "--format=s16".to_string(),
-                        "--rate=16000".to_string(),
-                        "--channels=1".to_string(),
-                        output,
-                    ],
-                ));
-            }
-        }
-
-        // Fallback to PulseAudio
+        // Prefer parecord for monitor sources (better PulseAudio compatibility)
         if Self::command_exists("parecord") {
             if let Some(monitor) = Self::find_pulse_monitor() {
                 return Ok((
@@ -131,6 +114,23 @@ impl ListenRecorder {
                         "--rate=16000".to_string(),
                         "--channels=1".to_string(),
                         "--file-format=wav".to_string(),
+                        output,
+                    ],
+                ));
+            }
+        }
+
+        // Fallback to PipeWire native
+        if Self::command_exists("pw-record") {
+            if let Some(monitor) = Self::find_pipewire_monitor() {
+                return Ok((
+                    "pw-record",
+                    vec![
+                        "--target".to_string(),
+                        monitor,
+                        "--format=s16".to_string(),
+                        "--rate=16000".to_string(),
+                        "--channels=1".to_string(),
                         output,
                     ],
                 ));
