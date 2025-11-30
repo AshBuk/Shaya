@@ -125,6 +125,7 @@ impl AppState {
     }
 
     /// Check if API key is configured
+    #[allow(dead_code)]
     pub fn has_api_key(&self) -> bool {
         !self.settings.api_key.is_empty()
     }

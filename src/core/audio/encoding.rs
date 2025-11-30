@@ -5,6 +5,10 @@
 // https://github.com/AshBuk/ShyQuiet
 
 //! Audio encoding utilities
+//!
+//! Used for real-time audio processing when VAD is enabled.
+
+#![allow(dead_code)]
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use hound::{WavSpec, WavWriter};

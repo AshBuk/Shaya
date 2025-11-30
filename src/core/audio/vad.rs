@@ -5,6 +5,9 @@
 // https://github.com/AshBuk/ShyQuiet
 
 //! Voice Activity Detection
+//!
+//! Used for the "Listen" feature (🎧) — auto-detect speech
+//! to automatically start/stop recording when they speak...
 
 use serde::{Deserialize, Serialize};
 

@@ -55,11 +55,6 @@ impl GroqClient {
         }
     }
 
-    /// Send a chat completion request (blocking)
-    pub fn chat(&self, messages: &[Message], system_prompt: &str) -> Result<String> {
-        self.chat_with_image(messages, system_prompt, None)
-    }
-
     /// Send a chat completion request with optional image (Vision API)
     pub fn chat_with_image(
         &self,

@@ -8,14 +8,8 @@
 //!
 //! GTK4 + Layer-Shell for invisible screen sharing on Wayland.
 
-#[allow(dead_code)]
 mod core;
 mod ui;
-
-#[allow(dead_code)]
-pub mod error;
-#[allow(dead_code)]
-pub mod helpers;
 
 pub use ui::stealth;
 
