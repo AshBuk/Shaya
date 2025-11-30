@@ -1,0 +1,34 @@
+#!/bin/bash
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+# Format Rust code (inside Docker)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_ROOT/docker" || exit 1
+
+# Detect docker compose command
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DC="docker compose"
+elif command -v docker-compose &> /dev/null; then
+    DC="docker-compose"
+else
+    echo "Error: Docker Compose not available"
+    exit 1
+fi
+
+$DC up -d
+
+echo "=== Formatting Rust ==="
+echo ""
+
+$DC exec shyquiet bash -c '
+    cd /app
+    cargo fmt --all
+    echo "✓ Rust formatted!"
+'

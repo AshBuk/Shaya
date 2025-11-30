@@ -1,0 +1,22 @@
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ShyQuiet
+GenericName=AI Assistant
+Comment=Privacy-first AI assistant with stealth mode - invisible during screen sharing
+Exec=shyquiet
+Icon=shyquiet
+Terminal=false
+Categories=Utility;Office;
+Keywords=ai;assistant;stealth;privacy;meeting;interview;invisible;
+StartupNotify=true
+StartupWMClass=com.shyquiet.app
+
+# System integration
+X-GNOME-UsesNotifications=true

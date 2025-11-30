@@ -1,0 +1,17 @@
+#!/bin/bash
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+# ShyQuiet - Run in background with debug logging
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+LOG_FILE="/tmp/shyquiet.log"
+
+RUST_LOG=debug "$PROJECT_ROOT/target/release/shyquiet" > "$LOG_FILE" 2>&1 &
+PID=$!
+
+echo "ShyQuiet started in background (PID: $PID)"
+echo "View logs: ./dev logs"

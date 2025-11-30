@@ -1,0 +1,52 @@
+[package]
+name = "shyquiet"
+version = "0.1.0"
+description = "Privacy-first AI assistant with stealth mode - invisible on screen sharing."
+authors = ["Asher Buk"]
+license = "Apache-2.0"
+repository = "https://github.com/AshBuk/ShyQuiet"
+homepage = "https://github.com/AshBuk/ShyQuiet"
+edition = "2021"
+keywords = ["rust", "ai", "assistent", "privacy", "wayland", "gtk4", "stealth"]
+categories = ["gui", "accessibility"]
+
+[lib]
+name = "shyquiet_lib"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "shyquiet"
+path = "src/main.rs"
+
+[dependencies]
+# GTK4 + Adwaita (UI)
+gtk4 = "0.9"
+libadwaita = { version = "0.7", features = ["v1_5"] }
+gtk4-layer-shell = "0.4"
+
+# Core utilities
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+dirs = "5.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
+
+# HTTP client (AI/STT APIs)
+ureq = { version = "2.10", features = ["json"] }
+
+# Audio processing
+hound = "3.5.1"
+base64 = "0.22"
+libc = "0.2"
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

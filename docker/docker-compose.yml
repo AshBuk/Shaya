@@ -1,0 +1,24 @@
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+services:
+  shyquiet:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: shyquiet
+    volumes:
+      - ..:/app
+      - cargo_cache:/root/.cargo/registry
+      - cargo_git:/root/.cargo/git
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+volumes:
+  cargo_cache:
+  cargo_git:

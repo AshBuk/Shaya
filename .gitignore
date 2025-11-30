@@ -1,0 +1,36 @@
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# Build artifacts
+*.dmg
+*.app
+*.deb
+*.rpm
+*.AppImage
+*.exe
+*.msi
+
+# IDE
+.vscode/
+.cursor/
+.claude/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local

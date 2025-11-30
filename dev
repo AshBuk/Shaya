@@ -1,0 +1,43 @@
+#!/bin/bash
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+# ShyQuiet CLI - Development helper
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+
+if [ $# -eq 0 ]; then
+    echo "ShyQuiet Development CLI"
+    echo ""
+    echo "  ./dev docker   # Docker build helper (interactive menu)"
+    echo "  ./dev run      # Run ShyQuiet binary"
+    echo "  ./dev debug    # Run with debug logging"
+    echo "  ./dev logs     # View logs"
+    echo "  ./dev kill     # Stop running instances"
+    echo "  ./dev lint     # cargo clippy"
+    echo "  ./dev format   # cargo fmt"
+    exit 0
+fi
+
+COMMAND=$1
+shift
+
+case "$COMMAND" in
+    run|debug|logs|kill|docker|lint|format)
+        if [ -f "$SCRIPTS_DIR/$COMMAND" ]; then
+            exec "$SCRIPTS_DIR/$COMMAND" "$@"
+        else
+            echo "Error: Script not found: $SCRIPTS_DIR/$COMMAND"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Error: Unknown command '$COMMAND'"
+        echo "Run './dev' without arguments for help"
+        exit 1
+        ;;
+esac

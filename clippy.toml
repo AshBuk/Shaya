@@ -1,0 +1,25 @@
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/ShyQuiet
+
+# Clippy configuration for ShyQuiet
+# Focused on production quality, performance, and clean code
+
+# Cognitive complexity threshold (default: 25)
+cognitive-complexity-threshold = 20
+
+# Max function lines (encourages smaller functions)
+too-many-lines-threshold = 100
+
+# Max arguments in function (SRP indicator)
+too-many-arguments-threshold = 6
+
+# Avoid large stack allocations
+stack-size-threshold = 512000
+
+# Allow common patterns
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+
