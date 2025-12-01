@@ -9,8 +9,8 @@
 pub mod capture;
 pub mod encoding;
 pub mod listen;
-#[allow(dead_code)]
 pub mod vad;
 
 pub use capture::AudioRecorder;
 pub use listen::ListenRecorder;
+pub use vad::{analyze_audio_file, VadConfig};

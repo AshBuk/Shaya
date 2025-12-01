@@ -6,10 +6,11 @@
 
 //! Voice Activity Detection
 //!
-//! Used for the "Listen" feature (🎧) — auto-detect speech
-//! to automatically start/stop recording when they speak...
+//! Post-recording analysis: detect if audio contains speech,
+//! filter silence, avoid transcribing empty recordings.
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Voice Activity Detection configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +42,8 @@ impl Default for VadConfig {
     }
 }
 
-/// Apply noise gate to audio samples
+/// Apply noise gate to audio samples (for future real-time VAD)
+#[allow(dead_code)]
 pub fn apply_noise_gate(samples: &[f32], threshold: f32) -> Vec<f32> {
     const KNEE_RATIO: f32 = 3.0;
 
@@ -60,6 +62,10 @@ pub fn apply_noise_gate(samples: &[f32], threshold: f32) -> Vec<f32> {
 
 /// Calculate RMS and peak for audio chunk
 pub fn calculate_audio_metrics(chunk: &[f32]) -> (f32, f32) {
+    if chunk.is_empty() {
+        return (0.0, 0.0);
+    }
+
     let mut sumsq = 0.0f32;
     let mut peak = 0.0f32;
 
@@ -71,4 +77,101 @@ pub fn calculate_audio_metrics(chunk: &[f32]) -> (f32, f32) {
 
     let rms = (sumsq / chunk.len() as f32).sqrt();
     (rms, peak)
+}
+
+/// Result of VAD analysis
+#[derive(Debug)]
+pub struct VadResult {
+    pub has_speech: bool,       /// Whether speech was detected
+    pub avg_rms: f32,           /// Average RMS level
+    pub peak: f32,              /// Peak level
+    pub duration_secs: f32,     /// Duration in seconds
+}
+
+/// Analyze WAV file for voice activity
+/// Returns None if file cannot be read, Some(VadResult) otherwise
+pub fn analyze_audio_file(path: &Path, config: &VadConfig) -> Option<VadResult> {
+    let reader = hound::WavReader::open(path).ok()?;
+    let spec = reader.spec();
+    let sample_rate = spec.sample_rate as f32;
+
+    tracing::debug!(
+        "VAD: Reading WAV - format={:?}, channels={}, rate={}, bits={}",
+        spec.sample_format,
+        spec.channels,
+        spec.sample_rate,
+        spec.bits_per_sample
+    );
+
+    // Read samples and convert to f32 (normalized to -1.0..1.0)
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => {
+            // Read as i16 for 16-bit WAV files
+            let raw: Vec<i16> = reader
+                .into_samples::<i16>()
+                .filter_map(|s| s.ok())
+                .collect();
+            tracing::debug!("VAD: Read {} i16 samples", raw.len());
+            raw.iter().map(|&s| s as f32 / i16::MAX as f32).collect()
+        }
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
+    };
+
+    tracing::debug!("VAD: Total {} f32 samples", samples.len());
+
+    if samples.is_empty() {
+        return Some(VadResult {
+            has_speech: false,
+            avg_rms: 0.0,
+            peak: 0.0,
+            duration_secs: 0.0,
+        });
+    }
+
+    let duration_secs = samples.len() as f32 / sample_rate;
+
+    // Analyze in chunks
+    let mut speech_chunks = 0usize;
+    let mut total_rms = 0.0f32;
+    let mut max_peak = 0.0f32;
+    let mut chunk_count = 0usize;
+
+    for chunk in samples.chunks(config.hop_size) {
+        let (rms, peak) = calculate_audio_metrics(chunk);
+        total_rms += rms;
+        max_peak = max_peak.max(peak);
+        chunk_count += 1;
+
+        // Check if this chunk has speech
+        if rms > config.sensitivity_rms || peak > config.peak_threshold {
+            speech_chunks += 1;
+        }
+    }
+
+    let avg_rms = if chunk_count > 0 {
+        total_rms / chunk_count as f32
+    } else {
+        0.0
+    };
+
+    // Speech detected if enough chunks have activity
+    let has_speech = speech_chunks >= config.min_speech_chunks;
+
+    tracing::debug!(
+        "VAD: {} chunks with speech out of {}, avg_rms={:.4}, peak={:.4}",
+        speech_chunks,
+        chunk_count,
+        avg_rms,
+        max_peak
+    );
+
+    Some(VadResult {
+        has_speech,
+        avg_rms,
+        peak: max_peak,
+        duration_secs,
+    })
 }

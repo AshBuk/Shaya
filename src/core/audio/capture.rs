@@ -93,8 +93,15 @@ impl AudioRecorder {
         }
 
         if let Some(mut process) = self.process.take() {
-            // Kill the process to stop recording
+            // Send SIGTERM to allow process to finalize WAV header
+            #[cfg(unix)]
+            #[allow(unsafe_code)]
+            unsafe {
+                libc::kill(process.id() as i32, libc::SIGTERM);
+            }
+            #[cfg(not(unix))]
             let _ = process.kill();
+            // Wait for process to finish writing header
             let _ = process.wait();
         }
 

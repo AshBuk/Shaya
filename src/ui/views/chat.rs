@@ -7,7 +7,7 @@
 //! Chat View - AI interaction with Vision + Audio
 
 use crate::core::api::{groq::ImageData, GroqClient, WhisperClient};
-use crate::core::audio::{AudioRecorder, ListenRecorder};
+use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::capture;
 use crate::core::state::{AppState, Message};
 use gtk4::gio;
@@ -206,6 +206,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
 }
 
 /// Transcribe audio and insert result into entry field
+/// Uses VAD to skip transcription if no speech detected
 fn transcribe_and_insert(
     audio_path: std::path::PathBuf,
     state: &Rc<RefCell<AppState>>,
@@ -220,7 +221,34 @@ fn transcribe_and_insert(
 
     if stt_key.is_empty() {
         status_label.set_text("⚠️ Set STT API key in Settings");
+        status_label.set_visible(true);
         return;
+    }
+
+    // VAD check: skip transcription if no speech detected
+    let vad_config = VadConfig::default();
+    if let Some(vad_result) = analyze_audio_file(&audio_path, &vad_config) {
+        if !vad_result.has_speech {
+            tracing::info!(
+                "VAD: No speech detected (rms={:.4}, peak={:.4})",
+                vad_result.avg_rms,
+                vad_result.peak
+            );
+            status_label.set_text("🔇 No speech detected");
+            status_label.set_visible(true);
+            // Auto-hide after 2 seconds
+            let status_c = status_label.clone();
+            glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                status_c.set_visible(false);
+            });
+            return;
+        }
+        tracing::info!(
+            "VAD: Speech detected (rms={:.4}, peak={:.4}, duration={:.1}s)",
+            vad_result.avg_rms,
+            vad_result.peak,
+            vad_result.duration_secs
+        );
     }
 
     status_label.set_text("⏳ Transcribing...");
