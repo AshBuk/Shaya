@@ -156,16 +156,10 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         let state_c = state.clone();
         let status_c = status_label.clone();
         let listen_btn_c = listen_btn.clone();
-        let chat_view_c = chat_view.clone();
+        let entry_c = entry.clone();
 
         listen_btn.connect_clicked(move |_| {
-            handle_listen_click(
-                &listener_c,
-                &state_c,
-                &status_c,
-                &listen_btn_c,
-                &chat_view_c,
-            );
+            handle_listen_click(&listener_c, &state_c, &status_c, &listen_btn_c, &entry_c);
         });
     }
 
@@ -286,7 +280,7 @@ fn handle_listen_click(
     state: &Rc<RefCell<AppState>>,
     status_label: &Label,
     listen_btn: &Button,
-    chat_view: &TextView,
+    entry: &Entry,
 ) {
     let is_listening = listener.borrow().is_listening();
 
@@ -314,8 +308,7 @@ fn handle_listen_click(
         }
 
         let status_c = status_label.clone();
-        let state_c = state.clone();
-        let chat_view_c = chat_view.clone();
+        let entry_c = entry.clone();
 
         glib::spawn_future_local(async move {
             let result = gio::spawn_blocking(move || {
@@ -326,19 +319,21 @@ fn handle_listen_click(
 
             match result {
                 Ok(Ok(text)) => {
-                    // Add transcribed system audio to chat
-                    state_c.borrow_mut().current_messages.push(Message {
-                        role: "user".to_string(),
-                        content: format!("🎧 [Heard]: {}", text),
-                    });
-                    update_chat_display(&chat_view_c, &state_c.borrow());
+                    // Insert transcription with prefix into entry (user can edit before sending)
+                    let current = entry_c.text();
+                    let new_text = if current.is_empty() {
+                        format!("🎧 [Heard]: {}", text)
+                    } else {
+                        format!("{}\n🎧 [Heard]: {}", current, text)
+                    };
+                    entry_c.set_text(&new_text);
                     status_c.set_visible(false);
                 }
                 Ok(Err(e)) => {
                     status_c.set_text(&format!("❌ {}", e));
                 }
                 Err(e) => {
-                    status_c.set_text(&format!("❌ Listen transcription failed: {:?}", e));
+                    status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
                 }
             }
         });
