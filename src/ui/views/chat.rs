@@ -205,6 +205,64 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     vbox
 }
 
+/// Transcribe audio and insert result into entry field
+fn transcribe_and_insert(
+    audio_path: std::path::PathBuf,
+    state: &Rc<RefCell<AppState>>,
+    status_label: &Label,
+    entry: &Entry,
+    prefix: Option<&str>,
+) {
+    let (stt_key, stt_model) = {
+        let s = state.borrow();
+        (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
+    };
+
+    if stt_key.is_empty() {
+        status_label.set_text("⚠️ Set STT API key in Settings");
+        return;
+    }
+
+    status_label.set_text("⏳ Transcribing...");
+    status_label.set_visible(true);
+
+    let status_c = status_label.clone();
+    let entry_c = entry.clone();
+    let prefix_owned = prefix.map(|s| s.to_string());
+
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(move || {
+            let client = WhisperClient::new(&stt_key, &stt_model);
+            client.transcribe(&audio_path).map_err(|e| e.to_string())
+        })
+        .await;
+
+        match result {
+            Ok(Ok(text)) => {
+                let formatted = match &prefix_owned {
+                    Some(p) => format!("{}{}", p, text),
+                    None => text,
+                };
+
+                let current = entry_c.text();
+                let new_text = if current.is_empty() {
+                    formatted
+                } else {
+                    format!("{}\n{}", current, formatted)
+                };
+                entry_c.set_text(&new_text);
+                status_c.set_visible(false);
+            }
+            Ok(Err(e)) => {
+                status_c.set_text(&format!("❌ {}", e));
+            }
+            Err(e) => {
+                status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
+            }
+        }
+    });
+}
+
 fn handle_audio_click(
     recorder: &Rc<RefCell<AudioRecorder>>,
     state: &Rc<RefCell<AppState>>,
@@ -212,54 +270,19 @@ fn handle_audio_click(
     audio_btn: &Button,
     entry: &Entry,
 ) {
-    let is_recording = recorder.borrow().is_recording();
-
-    if is_recording {
+    if recorder.borrow().is_recording() {
         audio_btn.set_label("🎤 Record");
-        status_label.set_text("⏳ Transcribing...");
-        status_label.set_visible(true);
 
         let audio_path = match recorder.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
                 status_label.set_text(&format!("❌ {}", e));
+                status_label.set_visible(true);
                 return;
             }
         };
 
-        let (stt_key, stt_model) = {
-            let s = state.borrow();
-            (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
-        };
-
-        if stt_key.is_empty() {
-            status_label.set_text("⚠️ Set STT API key in Settings");
-            return;
-        }
-
-        let status_c = status_label.clone();
-        let entry_c = entry.clone();
-
-        glib::spawn_future_local(async move {
-            let result = gio::spawn_blocking(move || {
-                let client = WhisperClient::new(&stt_key, &stt_model);
-                client.transcribe(&audio_path).map_err(|e| e.to_string())
-            })
-            .await;
-
-            match result {
-                Ok(Ok(text)) => {
-                    entry_c.set_text(&text);
-                    status_c.set_visible(false);
-                }
-                Ok(Err(e)) => {
-                    status_c.set_text(&format!("❌ {}", e));
-                }
-                Err(e) => {
-                    status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
-                }
-            }
-        });
+        transcribe_and_insert(audio_path, state, status_label, entry, None);
     } else {
         match recorder.borrow_mut().start() {
             Ok(()) => {
@@ -282,66 +305,24 @@ fn handle_listen_click(
     listen_btn: &Button,
     entry: &Entry,
 ) {
-    let is_listening = listener.borrow().is_listening();
-
-    if is_listening {
+    if listener.borrow().is_listening() {
         listen_btn.set_label("🎧 Listen");
-        status_label.set_text("⏳ Transcribing...");
-        status_label.set_visible(true);
 
         let audio_path = match listener.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
                 status_label.set_text(&format!("❌ {}", e));
+                status_label.set_visible(true);
                 return;
             }
         };
 
-        let (stt_key, stt_model) = {
-            let s = state.borrow();
-            (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
-        };
-
-        if stt_key.is_empty() {
-            status_label.set_text("⚠️ Set STT API key in Settings");
-            return;
-        }
-
-        let status_c = status_label.clone();
-        let entry_c = entry.clone();
-
-        glib::spawn_future_local(async move {
-            let result = gio::spawn_blocking(move || {
-                let client = WhisperClient::new(&stt_key, &stt_model);
-                client.transcribe(&audio_path).map_err(|e| e.to_string())
-            })
-            .await;
-
-            match result {
-                Ok(Ok(text)) => {
-                    // Insert transcription with prefix into entry (user can edit before sending)
-                    let current = entry_c.text();
-                    let new_text = if current.is_empty() {
-                        format!("🎧 [Heard]: {}", text)
-                    } else {
-                        format!("{}\n🎧 [Heard]: {}", current, text)
-                    };
-                    entry_c.set_text(&new_text);
-                    status_c.set_visible(false);
-                }
-                Ok(Err(e)) => {
-                    status_c.set_text(&format!("❌ {}", e));
-                }
-                Err(e) => {
-                    status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
-                }
-            }
-        });
+        transcribe_and_insert(audio_path, state, status_label, entry, Some("🎧 [Heard]: "));
     } else {
         match listener.borrow_mut().start() {
             Ok(()) => {
                 listen_btn.set_label("⏹️ Stop");
-                status_label.set_text("🎧 Listening to system audio...");
+                status_label.set_text("🎧 Listening...");
                 status_label.set_visible(true);
             }
             Err(e) => {
