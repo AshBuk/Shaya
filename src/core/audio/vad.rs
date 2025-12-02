@@ -82,10 +82,14 @@ pub fn calculate_audio_metrics(chunk: &[f32]) -> (f32, f32) {
 /// Result of VAD analysis
 #[derive(Debug)]
 pub struct VadResult {
-    pub has_speech: bool,       /// Whether speech was detected
-    pub avg_rms: f32,           /// Average RMS level
-    pub peak: f32,              /// Peak level
-    pub duration_secs: f32,     /// Duration in seconds
+    /// Whether speech was detected
+    pub has_speech: bool,
+    /// Average RMS level
+    pub avg_rms: f32,
+    /// Peak level
+    pub peak: f32,
+    /// Duration in seconds
+    pub duration_secs: f32,
 }
 
 /// Analyze WAV file for voice activity

@@ -9,7 +9,7 @@ logs     # View logs in real-time
 kill     # Stop running instances
 docker   # Docker build helper (interactive menu)
 lint     # cargo clippy
-format   # cargo fmt
+fmt      # cargo fmt
 ```
 
 ## Docker Build Options
@@ -22,7 +22,7 @@ Run `./dev docker` for interactive menu:
 3) Build ShyQuiet (cargo build --release)
 4) Check compilation (cargo check)
 5) Lint (cargo clippy)
-6) Format (cargo fmt)
+6) Fmt (cargo fmt)
 7) Stop container
 8) Clean all
 ```

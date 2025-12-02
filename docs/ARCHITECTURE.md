@@ -81,7 +81,7 @@ ShyQuiet/
 │   └── docker-build.sh
 ├── scripts/
 │   ├── run, debug, logs, kill
-│   ├── docker, lint, format
+│   ├── docker, lint, fmt
 │   └── README.md
 └── docs/
     └── *.md
@@ -230,7 +230,7 @@ cargo build --release
 ### Lint & Format
 ```bash
 ./dev lint      # cargo clippy
-./dev format    # cargo fmt
+./dev fmt       # cargo fmt
 ```
 
 ---

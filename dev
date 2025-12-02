@@ -19,7 +19,7 @@ if [ $# -eq 0 ]; then
     echo "  ./dev logs     # View logs"
     echo "  ./dev kill     # Stop running instances"
     echo "  ./dev lint     # cargo clippy"
-    echo "  ./dev format   # cargo fmt"
+    echo "  ./dev fmt      # cargo fmt"
     exit 0
 fi
 
@@ -27,7 +27,7 @@ COMMAND=$1
 shift
 
 case "$COMMAND" in
-    run|debug|logs|kill|docker|lint|format)
+    run|debug|logs|kill|docker|lint|fmt)
         if [ -f "$SCRIPTS_DIR/$COMMAND" ]; then
             exec "$SCRIPTS_DIR/$COMMAND" "$@"
         else
