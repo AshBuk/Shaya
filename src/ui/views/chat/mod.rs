@@ -5,9 +5,13 @@
 // https://github.com/AshBuk/ShyQuiet
 
 //! Chat View - AI interaction with Vision + Audio
+//!
+//! Split into two parts for input passthrough:
+//! - `build_content` - read-only area (passthrough)
+//! - `build_input` - interactive controls (receives input)
 
 mod audio;
 mod messaging;
 mod view;
 
-pub use view::build;
+pub use view::{build_content, build_input};

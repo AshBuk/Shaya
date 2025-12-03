@@ -5,6 +5,10 @@
 // https://github.com/AshBuk/ShyQuiet
 
 //! Chat View UI construction
+//!
+//! Split into two parts for input passthrough:
+//! - `build_content` - read-only content (passthrough area)
+//! - `build_input` - interactive controls (control panel)
 
 use super::{audio, messaging};
 use crate::core::api::groq::ImageData;
@@ -15,23 +19,34 @@ use gtk4::{
     Box as GtkBox, Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, TextView,
     WrapMode,
 };
+use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Build the chat view
-pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
-    let vbox = GtkBox::new(Orientation::Vertical, 8);
-    vbox.set_margin_top(8);
-    vbox.set_margin_bottom(8);
+// Shared state for chat (used across content and input)
+thread_local! {
+    static CHAT_STATE: RefCell<Option<ChatSharedState>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone)]
+struct ChatSharedState {
+    chat_view: TextView,
+    status_label: Label,
+    attachment_label: Label,
+    attached_image: Rc<RefCell<Option<ImageData>>>,
+    recorder: Rc<RefCell<AudioRecorder>>,
+    listener: Rc<RefCell<ListenRecorder>>,
+}
+
+/// Build read-only content area (passthrough - clicks pass through)
+pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
+    let vbox = GtkBox::new(Orientation::Vertical, 4);
+    vbox.set_margin_top(4);
     vbox.set_margin_start(8);
     vbox.set_margin_end(8);
+    vbox.set_vexpand(true);
 
-    // Shared state
-    let recorder = Rc::new(RefCell::new(AudioRecorder::new()));
-    let listener = Rc::new(RefCell::new(ListenRecorder::new()));
-    let attached_image: Rc<RefCell<Option<ImageData>>> = Rc::new(RefCell::new(None));
-
-    // Status label
+    // Status label (shows recording/transcribing state)
     let status_label = Label::new(None);
     status_label.set_halign(gtk4::Align::Start);
     status_label.add_css_class("dim-label");
@@ -45,7 +60,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     attachment_label.set_visible(false);
     vbox.append(&attachment_label);
 
-    // Chat display
+    // Chat display (read-only, but allows text selection)
     let chat_view = TextView::new();
     chat_view.set_editable(false);
     chat_view.set_cursor_visible(false);
@@ -56,6 +71,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     chat_view.set_left_margin(8);
     chat_view.set_right_margin(8);
 
+    // ScrolledWindow handles mouse scroll events
     let scroll = ScrolledWindow::builder()
         .hscrollbar_policy(PolicyType::Never)
         .vscrollbar_policy(PolicyType::Automatic)
@@ -66,17 +82,53 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     vbox.append(&scroll);
     messaging::update_chat_display(&chat_view, &state.borrow());
 
-    // Input area
-    let input_box = GtkBox::new(Orientation::Horizontal, 8);
+    // Initialize shared state
+    let shared = ChatSharedState {
+        chat_view,
+        status_label,
+        attachment_label,
+        attached_image: Rc::new(RefCell::new(None)),
+        recorder: Rc::new(RefCell::new(AudioRecorder::new())),
+        listener: Rc::new(RefCell::new(ListenRecorder::new())),
+    };
+
+    CHAT_STATE.with(|s| {
+        *s.borrow_mut() = Some(shared);
+    });
+
+    vbox
+}
+
+/// Build interactive input area (control panel - receives input)
+pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> GtkBox {
+    let vbox = GtkBox::new(Orientation::Vertical, 4);
+
+    // Get shared state (build_content must be called first)
+    let shared = CHAT_STATE.with(|s| s.borrow().clone());
+    let Some(shared) = shared else {
+        tracing::error!("build_content must be called before build_input");
+        return vbox;
+    };
+
+    let chat_view = shared.chat_view;
+    let status_label = shared.status_label;
+    let attachment_label = shared.attachment_label;
+    let attached_image = shared.attached_image;
+    let recorder = shared.recorder;
+    let listener = shared.listener;
+
+    // Input row: entry + send button
+    let input_box = GtkBox::new(Orientation::Horizontal, 4);
 
     let entry = Entry::new();
     entry.set_hexpand(true);
-    entry.set_placeholder_text(Some("Type your message..."));
+    entry.set_placeholder_text(Some("Type message..."));
 
-    let send_btn = Button::with_label("Send");
+    let send_btn = Button::with_label("↑");
     send_btn.add_css_class("suggested-action");
+    send_btn.set_tooltip_text(Some("Send message"));
 
-    // Send button handler
+    // Send handler
     {
         let entry_c = entry.clone();
         let state_c = state.clone();
@@ -99,7 +151,7 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         });
     }
 
-    // Entry activate handler (Enter key)
+    // Enter key handler
     {
         let state_c = state.clone();
         let chat_view_c = chat_view.clone();
@@ -125,15 +177,14 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     input_box.append(&send_btn);
     vbox.append(&input_box);
 
-    // Action buttons
-    let buttons_box = GtkBox::new(Orientation::Horizontal, 8);
+    // Action buttons row (compact)
+    let buttons_box = GtkBox::new(Orientation::Horizontal, 4);
     buttons_box.set_halign(gtk4::Align::Center);
-    buttons_box.set_margin_top(8);
+    buttons_box.set_margin_top(4);
 
-    // Audio button
-    let audio_btn = Button::with_label("🎤 Record");
-    audio_btn.set_tooltip_text(Some("Record and transcribe audio"));
-
+    // 🎤 Record
+    let audio_btn = Button::with_label("🎤");
+    audio_btn.set_tooltip_text(Some("Record and transcribe"));
     {
         let recorder_c = recorder.clone();
         let state_c = state.clone();
@@ -146,10 +197,9 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         });
     }
 
-    // Listen button (system audio capture)
-    let listen_btn = Button::with_label("🎧 Listen");
-    listen_btn.set_tooltip_text(Some("Record system audio (what you hear)"));
-
+    // 🎧 Listen
+    let listen_btn = Button::with_label("🎧");
+    listen_btn.set_tooltip_text(Some("Capture system audio"));
     {
         let listener_c = listener.clone();
         let state_c = state.clone();
@@ -162,10 +212,9 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         });
     }
 
-    // Screenshot button
-    let screenshot_btn = Button::with_label("📷 Screenshot");
-    screenshot_btn.set_tooltip_text(Some("Take screenshot and attach to chat"));
-
+    // 📷 Screenshot
+    let screenshot_btn = Button::with_label("📷");
+    screenshot_btn.set_tooltip_text(Some("Attach screenshot"));
     {
         let image_c = attached_image.clone();
         let status_c = status_label.clone();
@@ -176,10 +225,9 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
         });
     }
 
-    // Clear button
-    let clear_btn = Button::with_label("🗑️ Clear");
-    clear_btn.set_tooltip_text(Some("Clear chat and attachments"));
-
+    // 🗑️ Clear
+    let clear_btn = Button::with_label("🗑️");
+    clear_btn.set_tooltip_text(Some("Clear chat"));
     {
         let state_c = state.clone();
         let chat_view_c = chat_view.clone();

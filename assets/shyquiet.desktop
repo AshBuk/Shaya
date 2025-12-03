@@ -15,8 +15,10 @@ Icon=shyquiet
 Terminal=false
 Categories=Utility;Office;
 Keywords=ai;assistant;stealth;privacy;meeting;interview;invisible;
-StartupNotify=true
-StartupWMClass=com.shyquiet.app
 
-# System integration
-X-GNOME-UsesNotifications=true
+# STEALTH: Disable all notifications to stay invisible
+StartupNotify=false
+StartupWMClass=com.shyquiet.stealth
+
+# STEALTH: No notification integration (visible in screen share)
+X-GNOME-UsesNotifications=false
