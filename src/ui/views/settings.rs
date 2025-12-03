@@ -9,13 +9,13 @@
 use crate::core::models::MODELS;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::Box as GtkBox;
+use gtk4::{ApplicationWindow, Box as GtkBox};
 use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Build the settings view
-pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
+pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
     let vbox = GtkBox::new(gtk4::Orientation::Vertical, 0);
 
     let page = adw::PreferencesPage::new();
@@ -131,10 +131,47 @@ pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
 
     let state_clone = state.clone();
     dark_mode_row.connect_active_notify(move |row| {
-        state_clone.borrow_mut().settings.dark_mode = row.is_active();
+        let is_dark = row.is_active();
+        state_clone.borrow_mut().settings.dark_mode = is_dark;
+
+        // Apply theme immediately
+        if let Some(display) = gtk4::gdk::Display::default() {
+            let style_manager = adw::StyleManager::for_display(&display);
+            style_manager.set_color_scheme(if is_dark {
+                adw::ColorScheme::ForceDark
+            } else {
+                adw::ColorScheme::ForceLight
+            });
+        }
     });
 
     appearance_group.add(&dark_mode_row);
+
+    // Window Opacity
+    let opacity_row = adw::ActionRow::new();
+    opacity_row.set_title("Window Opacity");
+    opacity_row.set_subtitle("Transparency level (100% = opaque)");
+
+    let opacity_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.3, 1.0, 0.05);
+    opacity_scale.set_value(state.borrow().settings.window_opacity);
+    opacity_scale.set_draw_value(true);
+    opacity_scale.set_value_pos(gtk4::PositionType::Right);
+    opacity_scale.set_hexpand(true);
+    opacity_scale.set_width_request(200);
+    opacity_scale.set_format_value_func(|_, value| format!("{:.0}%", value * 100.0));
+
+    let window_clone = window.clone();
+    let state_clone = state.clone();
+    opacity_scale.connect_value_changed(move |scale| {
+        let opacity = scale.value();
+        state_clone.borrow_mut().settings.window_opacity = opacity;
+        window_clone.set_opacity(opacity);
+    });
+
+    opacity_row.add_suffix(&opacity_scale);
+    opacity_row.set_activatable_widget(Some(&opacity_scale));
+    appearance_group.add(&opacity_row);
+
     page.add(&appearance_group);
 
     // Save button

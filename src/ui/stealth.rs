@@ -89,6 +89,9 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     // Initialize layer-shell (stealth mode)
     layer_shell::init(&window);
 
+    // Apply saved appearance settings
+    apply_appearance_settings(&window, &state);
+
     // Keyboard shortcut: Ctrl+Alt+S = toggle visibility
     setup_keyboard_shortcuts(&window);
 
@@ -96,7 +99,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
     // Create ViewStack first (needed by header for navigation)
-    let stack = build_view_stack(state.clone());
+    let stack = build_view_stack(&window, state.clone());
 
     // Header bar (navigation + drag handle)
     let header = header::build(&window, &stack);
@@ -117,7 +120,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 }
 
 /// Build ViewStack with all views
-fn build_view_stack(state: Rc<RefCell<AppState>>) -> adw::ViewStack {
+fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> adw::ViewStack {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
 
@@ -126,8 +129,8 @@ fn build_view_stack(state: Rc<RefCell<AppState>>) -> adw::ViewStack {
     stack.add_titled(&chat, Some("chat"), "Chat");
     stack.page(&chat).set_icon_name(Some("chat-symbolic"));
 
-    // Settings view
-    let settings = views::settings::build(state.clone());
+    // Settings view (needs window reference for opacity control)
+    let settings = views::settings::build(window, state.clone());
     stack.add_titled(&settings, Some("settings"), "Settings");
     stack
         .page(&settings)
@@ -169,6 +172,24 @@ fn build_control_panel(stack: &adw::ViewStack, state: Rc<RefCell<AppState>>) -> 
     });
 
     panel
+}
+
+/// Apply appearance settings from saved state
+fn apply_appearance_settings(window: &ApplicationWindow, state: &Rc<RefCell<AppState>>) {
+    let settings = &state.borrow().settings;
+
+    // Apply opacity
+    window.set_opacity(settings.window_opacity);
+
+    // Apply dark mode
+    if let Some(display) = gtk4::gdk::Display::default() {
+        let style_manager = adw::StyleManager::for_display(&display);
+        style_manager.set_color_scheme(if settings.dark_mode {
+            adw::ColorScheme::ForceDark
+        } else {
+            adw::ColorScheme::ForceLight
+        });
+    }
 }
 
 /// Setup keyboard shortcuts

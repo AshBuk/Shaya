@@ -19,6 +19,12 @@ pub struct Settings {
     pub stt_api_key: String,
     pub stt_model: String,
     pub dark_mode: bool,
+    #[serde(default = "default_opacity")]
+    pub window_opacity: f64,
+}
+
+fn default_opacity() -> f64 {
+    1.0
 }
 
 impl Default for Settings {
@@ -29,6 +35,7 @@ impl Default for Settings {
             stt_api_key: String::new(),
             stt_model: "whisper-large-v3-turbo".to_string(),
             dark_mode: true,
+            window_opacity: 1.0,
         }
     }
 }
