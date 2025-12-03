@@ -14,6 +14,7 @@
 //! - Lock file: Prevents duplicate instances without D-Bus
 //! - Layer::Overlay: Invisible in screen share
 
+use crate::core::lock;
 use crate::core::state::AppState;
 use crate::ui::views;
 use adw::prelude::*;
@@ -24,60 +25,17 @@ use gtk4::{
 };
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
-use std::fs;
-use std::path::PathBuf;
 use std::rc::Rc;
 
 const APP_ID: &str = "com.shyquiet.stealth";
 
-/// Get lock file path
-fn lock_file_path() -> PathBuf {
-    dirs::runtime_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("shyquiet.lock")
-}
-
-/// Acquire lock file (returns Ok if acquired, Err if already running)
-fn acquire_lock() -> anyhow::Result<()> {
-    let lock_path = lock_file_path();
-
-    if lock_path.exists() {
-        // Check if the process is still running by reading PID
-        if let Ok(pid_str) = fs::read_to_string(&lock_path) {
-            if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                // Check if process exists
-                let proc_path = format!("/proc/{}", pid);
-                if std::path::Path::new(&proc_path).exists() {
-                    anyhow::bail!("ShyQuiet is already running (PID: {})", pid);
-                }
-            }
-        }
-        // Stale lock file, remove it
-        let _ = fs::remove_file(&lock_path);
-    }
-
-    // Create lock file with our PID
-    fs::write(&lock_path, std::process::id().to_string())?;
-    tracing::debug!("Lock file acquired: {:?}", lock_path);
-    Ok(())
-}
-
-/// Release lock file
-fn release_lock() {
-    let lock_path = lock_file_path();
-    if let Err(e) = fs::remove_file(&lock_path) {
-        tracing::debug!("Failed to remove lock file: {}", e);
-    }
-}
-
 /// Run the stealth window application
 pub fn run() -> anyhow::Result<()> {
     // STEALTH: Check for existing instance via lock file (no D-Bus)
-    acquire_lock()?;
+    lock::acquire()?;
 
     // STEALTH: NON_UNIQUE = no D-Bus registration = true ghost mode
     // The app won't appear in D-Bus service list or respond to activation
-    // Using AdwApplication instead of gtk4::Application for better libadwaita integration
     let app = adw::Application::builder()
         .application_id(APP_ID)
         .flags(ApplicationFlags::NON_UNIQUE)
@@ -91,13 +49,13 @@ pub fn run() -> anyhow::Result<()> {
 
     // Clean up lock file on shutdown
     app.connect_shutdown(|_| {
-        release_lock();
+        lock::release();
     });
 
     let exit_code = app.run();
 
     // Also release on normal exit (in case shutdown signal wasn't called)
-    release_lock();
+    lock::release();
 
     if exit_code == glib::ExitCode::SUCCESS {
         Ok(())

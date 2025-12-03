@@ -9,5 +9,6 @@
 pub mod api;
 pub mod audio;
 pub mod capture;
+pub mod lock;
 pub mod models;
 pub mod state;
