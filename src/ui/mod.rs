@@ -12,5 +12,7 @@
 //! - History View - Past conversations
 //! - Prompts View - System prompts editor
 
+mod header;
+mod layer_shell;
 pub mod stealth;
 pub mod views;
