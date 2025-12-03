@@ -8,8 +8,7 @@
 
 use adw::prelude::*;
 use gtk4::{
-    ApplicationWindow, Box as GtkBox, EventControllerMotion, GestureDrag, Orientation,
-    ToggleButton,
+    ApplicationWindow, Box as GtkBox, EventControllerMotion, GestureDrag, Orientation, ToggleButton,
 };
 use libadwaita as adw;
 use std::cell::Cell;
@@ -206,4 +205,3 @@ fn setup_hover_feedback(header: &GtkBox) {
 
     header.add_controller(motion);
 }
-
