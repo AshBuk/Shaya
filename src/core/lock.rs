@@ -8,6 +8,9 @@
 //!
 //! STEALTH: Uses lock file instead of D-Bus activation to prevent
 //! duplicate instances while keeping the app invisible in service lists.
+//!
+//! When a second instance is launched, it sends SIGUSR1 to the first
+//! instance to show the window, then exits.
 
 use std::fs;
 use std::path::PathBuf;
@@ -21,9 +24,10 @@ pub fn path() -> PathBuf {
 
 /// Acquire lock file
 ///
-/// Returns Ok if lock acquired, Err if already running.
-/// Handles stale lock files by checking if PID is still alive.
-pub fn acquire() -> anyhow::Result<()> {
+/// Returns Ok(true) if lock acquired (we are the first instance).
+/// Returns Ok(false) if another instance is running (signaled to show).
+/// Returns Err only on actual errors.
+pub fn acquire() -> anyhow::Result<bool> {
     let lock_path = path();
 
     if lock_path.exists() {
@@ -33,7 +37,20 @@ pub fn acquire() -> anyhow::Result<()> {
                 // Check if process exists (Linux-specific)
                 let proc_path = format!("/proc/{}", pid);
                 if std::path::Path::new(&proc_path).exists() {
-                    anyhow::bail!("ShyQuiet is already running (PID: {})", pid);
+                    // Send SIGUSR1 to show the window
+                    #[cfg(unix)]
+                    {
+                        use nix::sys::signal::{kill, Signal};
+                        use nix::unistd::Pid;
+                        tracing::info!(
+                            "ShyQuiet already running (PID: {}), sending show signal",
+                            pid
+                        );
+                        if kill(Pid::from_raw(pid), Signal::SIGUSR1).is_ok() {
+                            tracing::info!("Signal sent - window should appear");
+                        }
+                    }
+                    return Ok(false); // Don't start, existing instance will show
                 }
             }
         }
@@ -44,7 +61,7 @@ pub fn acquire() -> anyhow::Result<()> {
     // Create lock file with our PID
     fs::write(&lock_path, std::process::id().to_string())?;
     tracing::debug!("Lock acquired: {:?}", lock_path);
-    Ok(())
+    Ok(true)
 }
 
 /// Release lock file
