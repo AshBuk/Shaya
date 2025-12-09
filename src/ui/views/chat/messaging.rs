@@ -103,10 +103,7 @@ pub fn send_message(
         (
             s.settings.api_key.clone(),
             s.settings.model.clone(),
-            s.prompts
-                .first()
-                .map(|p| p.content.clone())
-                .unwrap_or_else(|| "You are a helpful AI assistant.".to_string()),
+            s.active_prompt().to_string(),
         )
     };
 

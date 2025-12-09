@@ -80,6 +80,8 @@ pub struct AppState {
     pub settings: Settings,
     pub history: Vec<Conversation>,
     pub prompts: Vec<SystemPrompt>,
+    #[serde(default)]
+    pub active_prompt_id: Option<String>,
     #[serde(skip)]
     pub current_messages: Vec<Message>,
 }
@@ -90,6 +92,7 @@ impl Default for AppState {
             settings: Settings::default(),
             history: Vec::new(),
             prompts: vec![SystemPrompt::default()],
+            active_prompt_id: None,
             current_messages: Vec::new(),
         }
     }
@@ -135,5 +138,50 @@ impl AppState {
     #[allow(dead_code)]
     pub fn has_api_key(&self) -> bool {
         !self.settings.api_key.is_empty()
+    }
+
+    /// Get active system prompt content
+    pub fn active_prompt(&self) -> &str {
+        self.active_prompt_id
+            .as_ref()
+            .and_then(|id| self.prompts.iter().find(|p| p.id == *id))
+            .or_else(|| self.prompts.first())
+            .map(|p| p.content.as_str())
+            .unwrap_or("You are a helpful AI assistant.")
+    }
+
+    /// Get active prompt index (for UI)
+    pub fn active_prompt_index(&self) -> usize {
+        self.active_prompt_id
+            .as_ref()
+            .and_then(|id| self.prompts.iter().position(|p| p.id == *id))
+            .unwrap_or(0)
+    }
+
+    /// Add new prompt, returns its ID
+    pub fn add_prompt(&mut self, name: String, content: String) -> String {
+        let id = format!("prompt-{}", chrono::Utc::now().timestamp_millis());
+        self.prompts.push(SystemPrompt {
+            id: id.clone(),
+            name,
+            content,
+        });
+        id
+    }
+
+    /// Remove prompt by ID (can't remove last one)
+    pub fn remove_prompt(&mut self, id: &str) -> bool {
+        if self.prompts.len() <= 1 {
+            return false;
+        }
+        if let Some(pos) = self.prompts.iter().position(|p| p.id == id) {
+            self.prompts.remove(pos);
+            // Reset active if removed
+            if self.active_prompt_id.as_deref() == Some(id) {
+                self.active_prompt_id = self.prompts.first().map(|p| p.id.clone());
+            }
+            return true;
+        }
+        false
     }
 }
