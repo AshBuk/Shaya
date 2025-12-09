@@ -212,7 +212,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
         .hscrollbar_policy(PolicyType::Never)
         .vscrollbar_policy(PolicyType::Automatic)
         .vexpand(true)
-        .min_content_height(150)
+        .min_content_height(80)
         .child(&text_view)
         .build();
     inner.append(&scroll);
@@ -250,5 +250,13 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
     btn_box.append(&save_btn);
     inner.append(&btn_box);
 
-    container.append(&inner);
+    // Wrap in ScrolledWindow to allow vertical resize
+    let scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .vexpand(true)
+        .child(&inner)
+        .build();
+
+    container.append(&scroll);
 }

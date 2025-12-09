@@ -9,7 +9,7 @@
 use super::chat;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::{Box as GtkBox, Button};
+use gtk4::{Box as GtkBox, Button, PolicyType, ScrolledWindow};
 use libadwaita as adw;
 use libadwaita::prelude::MessageDialogExt;
 use std::cell::RefCell;
@@ -50,13 +50,19 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
     let state_ref = state.borrow();
 
     if state_ref.history.is_empty() {
-        // Empty state
+        // Empty state (wrapped in scroll for resize)
         let status = adw::StatusPage::new();
         status.set_icon_name(Some("chat-symbolic"));
         status.set_title("No Conversations Yet");
         status.set_description(Some("Start a chat and save it to see history here"));
-        status.set_vexpand(true);
-        container.append(&status);
+
+        let scroll = ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .vexpand(true)
+            .child(&status)
+            .build();
+        container.append(&scroll);
     } else {
         // List of conversations (newest first)
         let list = gtk4::ListBox::new();
@@ -149,7 +155,9 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
             list.append(&row);
         }
 
-        let scroll = gtk4::ScrolledWindow::builder()
+        let scroll = ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
             .vexpand(true)
             .child(&list)
             .build();

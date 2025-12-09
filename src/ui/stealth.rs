@@ -19,8 +19,9 @@ use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio::ApplicationFlags;
-use gtk4::{glib, ApplicationWindow, Box as GtkBox, Orientation};
+use gtk4::{glib, ApplicationWindow, Box as GtkBox, GestureDrag, Label, Orientation, Overlay};
 use libadwaita as adw;
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -86,6 +87,9 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
         .default_height(550)
         .build();
 
+    // Set minimum window size (allows flexible resizing)
+    window.set_size_request(300, 250);
+
     // Store for SIGUSR1 handler
     MAIN_WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
 
@@ -118,7 +122,15 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     let control_panel = build_control_panel(&stack, state);
     main_box.append(&control_panel);
 
-    window.set_child(Some(&main_box));
+    // Wrap in overlay for resize handle
+    let overlay = Overlay::new();
+    overlay.set_child(Some(&main_box));
+
+    // Resize handle (bottom-right corner)
+    let resize_handle = build_resize_handle(&window);
+    overlay.add_overlay(&resize_handle);
+
+    window.set_child(Some(&overlay));
     window.present();
 }
 
@@ -175,6 +187,43 @@ fn build_control_panel(stack: &adw::ViewStack, state: Rc<RefCell<AppState>>) -> 
     });
 
     panel
+}
+
+/// Build resize handle for bottom-right corner
+fn build_resize_handle(window: &ApplicationWindow) -> Label {
+    let handle = Label::new(Some("⋱"));
+    handle.set_halign(gtk4::Align::End);
+    handle.set_valign(gtk4::Align::End);
+    handle.set_margin_end(4);
+    handle.set_margin_bottom(4);
+    handle.add_css_class("dim-label");
+    handle.set_cursor_from_name(Some("se-resize"));
+    handle.set_tooltip_text(Some("Drag to resize"));
+
+    let start_size: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
+
+    let drag = GestureDrag::new();
+
+    // Drag begin: store current size
+    let window_c = window.clone();
+    let start_size_c = start_size.clone();
+    drag.connect_drag_begin(move |_, _, _| {
+        let (w, h) = (window_c.width(), window_c.height());
+        start_size_c.set((w, h));
+    });
+
+    // Drag update: resize window
+    let window_c = window.clone();
+    let start_size_c = start_size.clone();
+    drag.connect_drag_update(move |_, offset_x, offset_y| {
+        let (start_w, start_h) = start_size_c.get();
+        let new_w = (start_w + offset_x as i32).max(300);
+        let new_h = (start_h + offset_y as i32).max(250);
+        window_c.set_default_size(new_w, new_h);
+    });
+
+    handle.add_controller(drag);
+    handle
 }
 
 /// Apply appearance settings from saved state

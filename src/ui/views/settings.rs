@@ -9,7 +9,7 @@
 use crate::core::models::MODELS;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::{ApplicationWindow, Box as GtkBox};
+use gtk4::{ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow};
 use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -191,6 +191,14 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     save_group.add(&save_btn);
     page.add(&save_group);
 
-    vbox.append(&page);
+    // Wrap in ScrolledWindow to allow vertical resize
+    let scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .vexpand(true)
+        .child(&page)
+        .build();
+
+    vbox.append(&scroll);
     vbox
 }
