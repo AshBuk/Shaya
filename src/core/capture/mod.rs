@@ -5,7 +5,10 @@
 // https://github.com/AshBuk/ShyQuiet
 
 //! Screenshot capture for Wayland/X11
-//! On GNOME: hides window before capture to exclude it from screenshot
+//!
+//! Stealth-safe on wlr-layer-shell compositors (Sway, Hyprland):
+//! - slurp uses layer-shell Overlay
+//! - grim captures only normal windows → ShyQuiet not captured
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use std::fs;
@@ -19,17 +22,35 @@ pub struct Screenshot {
     pub mime_type: String,
 }
 
-/// Take a screenshot of the entire screen
-/// Returns base64 encoded PNG image
-pub fn take_screenshot() -> Result<Screenshot, String> {
-    let output_path = std::env::temp_dir().join("shyquiet_screenshot.png");
-
-    // Remove old screenshot
+/// Capture user-selected area
+/// Uses slurp + grim on Wayland, gnome-screenshot -a on GNOME/X11
+pub fn capture_area() -> Result<Screenshot, String> {
+    let output_path = std::env::temp_dir().join("shyquiet_area.png");
     let _ = fs::remove_file(&output_path);
 
-    tracing::info!("Taking screenshot to {:?}", output_path);
+    tracing::info!("Starting area selection");
 
-    // Try different screenshot tools
+    if is_wayland() && has_command("slurp") && has_command("grim") {
+        // Wayland with wlr-layer-shell (Sway, Hyprland)
+        // slurp creates layer-shell Overlay → stealth-safe
+        capture_area_slurp_grim(&output_path)?;
+    } else if has_command("gnome-screenshot") {
+        // GNOME or X11 fallback
+        capture_area_gnome(&output_path)?;
+    } else {
+        return Err("No area capture tool. Install: slurp+grim or gnome-screenshot".to_string());
+    }
+
+    read_and_encode(&output_path)
+}
+
+/// Take a screenshot of the entire screen
+pub fn take_screenshot() -> Result<Screenshot, String> {
+    let output_path = std::env::temp_dir().join("shyquiet_screenshot.png");
+    let _ = fs::remove_file(&output_path);
+
+    tracing::info!("Taking full screenshot");
+
     let result = if is_wayland() {
         take_wayland_screenshot(&output_path)
     } else {
@@ -37,23 +58,24 @@ pub fn take_screenshot() -> Result<Screenshot, String> {
     };
 
     result?;
+    read_and_encode(&output_path)
+}
 
-    // Read and encode the screenshot
-    if !output_path.exists() {
+/// Read screenshot file and encode to base64
+fn read_and_encode(path: &Path) -> Result<Screenshot, String> {
+    if !path.exists() {
         return Err("Screenshot file not created".to_string());
     }
 
-    let image_data =
-        fs::read(&output_path).map_err(|e| format!("Failed to read screenshot: {}", e))?;
+    let image_data = fs::read(path).map_err(|e| format!("Failed to read screenshot: {}", e))?;
 
     if image_data.len() < 100 {
-        return Err("Screenshot too small".to_string());
+        return Err("Screenshot too small or cancelled".to_string());
     }
 
     tracing::info!("Screenshot captured: {} bytes", image_data.len());
 
-    // Cleanup
-    let _ = fs::remove_file(&output_path);
+    let _ = fs::remove_file(path);
 
     Ok(Screenshot {
         base64_data: B64.encode(&image_data),
@@ -61,8 +83,74 @@ pub fn take_screenshot() -> Result<Screenshot, String> {
     })
 }
 
+/// Capture area using slurp + grim (stealth-safe on Sway/Hyprland)
+fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
+    // Run slurp to get geometry (layer-shell Overlay → invisible in screen share)
+    let slurp_output = Command::new("slurp")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to run slurp: {}", e))?;
+
+    if !slurp_output.status.success() {
+        return Err("Area selection cancelled".to_string());
+    }
+
+    let geometry = String::from_utf8_lossy(&slurp_output.stdout)
+        .trim()
+        .to_string();
+
+    if geometry.is_empty() {
+        return Err("No area selected".to_string());
+    }
+
+    tracing::info!("Selected area: {}", geometry);
+
+    // Capture with grim
+    let status = Command::new("grim")
+        .args(["-g", &geometry, output.to_string_lossy().as_ref()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
+        .map_err(|e| format!("Failed to run grim: {}", e))?;
+
+    if !status.success() {
+        return Err("grim capture failed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Capture area using gnome-screenshot -a
+fn capture_area_gnome(output: &Path) -> Result<(), String> {
+    let status = Command::new("gnome-screenshot")
+        .args(["-a", "-f", output.to_string_lossy().as_ref()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
+        .map_err(|e| format!("Failed to run gnome-screenshot: {}", e))?;
+
+    if !status.success() {
+        return Err("Area selection cancelled".to_string());
+    }
+
+    Ok(())
+}
+
 fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
+fn has_command(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn take_wayland_screenshot(output: &Path) -> Result<(), String> {

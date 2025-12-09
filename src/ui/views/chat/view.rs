@@ -212,9 +212,22 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
         });
     }
 
-    // 📷 Screenshot
+    // 🖱️ Select area
+    let area_btn = Button::with_label("🖱️");
+    area_btn.set_tooltip_text(Some("Select area to capture"));
+    {
+        let image_c = attached_image.clone();
+        let status_c = status_label.clone();
+        let attach_label_c = attachment_label.clone();
+
+        area_btn.connect_clicked(move |_| {
+            messaging::handle_area_capture_click(&image_c, &status_c, &attach_label_c);
+        });
+    }
+
+    // 📷 Full screenshot
     let screenshot_btn = Button::with_label("📷");
-    screenshot_btn.set_tooltip_text(Some("Attach screenshot"));
+    screenshot_btn.set_tooltip_text(Some("Capture full screen"));
     {
         let image_c = attached_image.clone();
         let status_c = status_label.clone();
@@ -244,6 +257,7 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
 
     buttons_box.append(&audio_btn);
     buttons_box.append(&listen_btn);
+    buttons_box.append(&area_btn);
     buttons_box.append(&screenshot_btn);
     buttons_box.append(&clear_btn);
     vbox.append(&buttons_box);

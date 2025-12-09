@@ -17,7 +17,37 @@ use gtk4::{Button, Entry, Label, ScrolledWindow, TextView};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Handle screenshot button click
+/// Handle area selection button click (slurp + grim)
+pub fn handle_area_capture_click(
+    image: &Rc<RefCell<Option<ImageData>>>,
+    status_label: &Label,
+    attach_label: &Label,
+) {
+    status_label.set_text("🖱️ Select area...");
+    status_label.set_visible(true);
+
+    // Capture selected area (stealth-safe: slurp uses layer-shell Overlay)
+    match capture::capture_area() {
+        Ok(screenshot) => {
+            let size_kb = screenshot.base64_data.len() / 1024;
+            tracing::info!("Area screenshot attached: {}KB", size_kb);
+
+            *image.borrow_mut() = Some(ImageData {
+                base64_data: screenshot.base64_data,
+                mime_type: screenshot.mime_type,
+            });
+
+            attach_label.set_text(&format!("📎 Screenshot attached ({}KB)", size_kb));
+            attach_label.set_visible(true);
+            status_label.set_visible(false);
+        }
+        Err(e) => {
+            status_label.set_text(&format!("❌ {}", e));
+        }
+    }
+}
+
+/// Handle full screenshot button click
 pub fn handle_screenshot_click(
     image: &Rc<RefCell<Option<ImageData>>>,
     status_label: &Label,
@@ -152,7 +182,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
 
     if state.current_messages.is_empty() {
         buffer.set_text(
-            "Welcome to ShyQuiet 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n📷 Attach screenshot",
+            "Welcome to ShyQuiet 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
         );
         return;
     }
