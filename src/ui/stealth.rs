@@ -9,7 +9,10 @@
 //! Main application window with stealth features:
 //! - NON_UNIQUE: No D-Bus registration (ghost mode)
 //! - Lock file: Single instance without D-Bus
-//! - Layer::Overlay: Invisible in screen share
+//! - Layer::Overlay: Hidden from wlr-screencopy (grim)
+//!
+//! NOTE: PipeWire capture (Zoom/Meet/OBS) sees this window.
+//! See docs/STEALTH_GUIDE.md for virtual monitor workaround.
 
 use super::{header, layer_shell, views};
 use crate::core::lock;

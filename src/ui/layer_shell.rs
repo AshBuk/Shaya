@@ -7,18 +7,21 @@
 //! Layer-shell initialization for stealth mode
 //!
 //! Configures the window as an invisible overlay that:
-//! - Is not captured by screen sharing tools (grim, Zoom, Meet)
+//! - Is NOT captured by wlr-screencopy tools (grim, slurp)
 //! - Does not appear in window lists (Alt+Tab, taskbar)
 //! - Floats above other windows
 //!
-//! Fallback for GNOME/X11: normal window (pseudo-stealth when sharing specific window)
+//! IMPORTANT: PipeWire-based capture (Zoom, Meet, OBS) WILL capture this window.
+//! For full stealth during screen share, use virtual monitor setup.
+//! See docs/STEALTH_GUIDE.md for details.
+//!
+//! Fallback for GNOME/X11: normal window (share specific window for pseudo-stealth)
 
 use gtk4::ApplicationWindow;
 
 /// Initialize layer-shell for stealth mode
 ///
-/// This makes the window invisible in screen sharing on Wayland
-/// compositors that support wlr-layer-shell (Sway, Hyprland, etc.)
+/// Makes window invisible to wlr-screencopy protocol (grim, slurp).
 #[cfg(target_os = "linux")]
 pub fn init(window: &ApplicationWindow) {
     use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -50,8 +53,8 @@ pub fn init(window: &ApplicationWindow) {
 
     window.init_layer_shell();
 
-    // Layer::Overlay — invisible in screen share
-    // This is the highest layer, not captured by screenshot tools
+    // Layer::Overlay — not captured by wlr-screencopy (grim)
+    // NOTE: PipeWire-based capture (Zoom/Meet) WILL see this layer
     window.set_layer(Layer::Overlay);
 
     // KeyboardMode::None — HUD mode: no auto-focus, type freely in windows below

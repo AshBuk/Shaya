@@ -2,7 +2,7 @@
 
 ## Overview
 
-ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible during screen sharing on Wayland.
+ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to `wlr-screencopy` based tools on Wayland (Sway, Hyprland). See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for PipeWire/Zoom limitations.
 
 ## Core Principle
 
@@ -130,7 +130,7 @@ sudo apt install libgtk-4-dev libadwaita-1-dev
 ## Unified Stealth Window
 
 ### Purpose
-Single window containing ALL functionality — invisible in screen share on Wayland.
+Single window containing ALL functionality — invisible to wlr-screencopy tools (grim, slurp).
 
 ### UI Structure
 ```
@@ -162,26 +162,34 @@ Single window containing ALL functionality — invisible in screen share on Wayl
 
 ## Stealth Mode
 
-### Wayland (Full Stealth) ✅
+### How It Works
 - Protocol: `zwlr-layer-shell-v1`
 - Layer: `Overlay`
-- Keyboard: `OnDemand`
-- Result: NOT in compositor window list
+- Keyboard: `None` (HUD mode)
 
-### X11 (No Stealth) ⚠️
-- X11 protocol does not support hiding windows from screen capture
-- App runs as regular GTK4 window
-- All features work, but window IS VISIBLE in screen share
-- **Recommendation:** Use Wayland for stealth functionality
+### Stealth Compatibility
 
-### Test Criteria (Wayland)
-```bash
-# Stealth window should NOT appear:
-grim screenshot.png           # Screenshot
-swaymsg -t get_tree          # Window tree
-Zoom/Meet screen share       # Video call
-OBS window capture           # Streaming
-```
+| Capture Method | Stealth | Notes |
+|----------------|---------|-------|
+| `grim` (wlr-screencopy) | ✅ Hidden | Protocol excludes Overlay |
+| `swaymsg -t get_tree` | ✅ Hidden | Layer surfaces not in tree |
+| Zoom/Meet/Teams (PipeWire) | ❌ Visible | PipeWire gets full framebuffer |
+| OBS PipeWire capture | ❌ Visible | Same limitation |
+
+### Solutions for Full Screen Share
+
+1. **Share specific window** — Select browser/IDE window instead of entire screen
+2. **Virtual monitor** — Use `wl-mirror` to create clean output without overlay
+
+See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for virtual monitor setup.
+
+### Platform Support
+
+| Platform | Stealth |
+|----------|---------|
+| Wayland + wlr-layer-shell (Sway, Hyprland) | ✅ Partial (see table above) |
+| GNOME Wayland | ❌ No layer-shell support |
+| X11 | ❌ No stealth possible |
 
 ---
 

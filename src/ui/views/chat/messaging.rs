@@ -152,7 +152,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
 
     if state.current_messages.is_empty() {
         buffer.set_text(
-            "Welcome to ShyQuiet!\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n📷 Attach screenshot",
+            "Welcome to ShyQuiet 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n📷 Attach screenshot",
         );
         return;
     }
