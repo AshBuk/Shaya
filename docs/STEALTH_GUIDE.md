@@ -1,166 +1,152 @@
 # Stealth Mode Guide
 
-## How Stealth Works
+## TL;DR — How to Get Full Stealth
 
-ShyQuiet uses `Layer::Overlay` via `wlr-layer-shell` protocol.
+| Compositor | Full Stealth | Setup |
+|------------|--------------|-------|
+| **Hyprland** | ✅ YES | Add one line to config |
+| **Sway** | ❌ No | Share window only |
+| **GNOME** | ❌ No | Share window only |
 
-| Capture Method | Stealth | Why |
-|----------------|---------|-----|
-| `grim` (wlr-screencopy) | ✅ Hidden | Protocol excludes Overlay layer |
-| `swaymsg -t get_tree` | ✅ Hidden | Layer-shell surfaces not in tree |
-| Zoom/Meet/Teams (PipeWire) | ❌ **Visible** | PipeWire gets full framebuffer |
-| OBS PipeWire capture | ❌ **Visible** | Same as above |
-
-**Bottom line:** Stealth works with `grim`, but NOT with Zoom/Meet when sharing entire screen.
+**Hyprland is the only compositor that supports true stealth mode.**
 
 ---
 
-## Solutions
+## Hyprland Setup (Recommended)
 
-### Option 1: Share Specific Window (Simple)
+Add this line to `~/.config/hypr/hyprland.conf`:
 
-In Zoom/Meet, choose **"Share Window"** instead of **"Share Screen"**.
-Select your browser or IDE window — ShyQuiet overlay won't be captured.
+```ini
+layerrule = no_screen_share, shyquiet-stealth
+```
 
-### Option 2: Virtual Monitor (Full Screen Share)
+**That's it.** ShyQuiet will be invisible in:
+- ✅ `grim` screenshots
+- ✅ `wl-mirror`
+- ✅ PipeWire screen share (Zoom, Meet, Teams)
+- ✅ OBS screen capture
+- ✅ All screencopy-based tools
 
-Use `wl-mirror` to create a "clean" virtual monitor without overlay.
+### Verify It Works
+
+```bash
+# Start ShyQuiet
+./target/release/shyquiet &
+
+# Take screenshot
+grim /tmp/test.png && xdg-open /tmp/test.png
+# ShyQuiet should NOT appear
+```
 
 ---
 
-## Virtual Monitor Setup (Sway)
+## How It Works
 
-### 1. Install wl-mirror
+ShyQuiet uses `wlr-layer-shell` protocol with namespace `shyquiet-stealth`.
 
-```bash
-# Fedora
-sudo dnf install wl-mirror
+Hyprland's `layerrule = noscreenshare on, <namespace>` tells the compositor to **exclude** that layer from all screencopy operations.
 
-# Arch
-sudo pacman -S wl-mirror
+```
+Hyprland rendering:
+┌─────────────────────────────────────────────┐
+│           Output Framebuffer                │
+│  ┌───────────────────────────────────────┐  │
+│  │  All layers...                        │  │
+│  │  + ShyQuiet (Layer::Overlay)          │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
 
-# Build from source
-git clone https://github.com/Ferdi265/wl-mirror.git
-cd wl-mirror && meson build && ninja -C build
-sudo ninja -C build install
+Hyprland screencopy with noscreenshare rule:
+┌─────────────────────────────────────────────┐
+│        Screencopy Buffer                    │
+│  ┌───────────────────────────────────────┐  │
+│  │  All layers...                        │  │
+│  │  (ShyQuiet EXCLUDED)                  │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────────────────────────────────┘
 ```
 
-### 2. Create Script
+---
 
-Save as `~/.config/sway/scripts/stealth-mirror.sh`:
+## Why Sway Doesn't Work
 
-```bash
-#!/bin/bash
-# Stealth Mirror - screen share without ShyQuiet overlay
-# Usage: stealth-mirror.sh [start|stop|toggle]
+Sway's `wlr-screencopy` captures the **composited framebuffer** after all layers are merged. There's no filtering mechanism.
 
-HEADLESS="HEADLESS-1"
-PID_FILE="/tmp/stealth-mirror.pid"
+| Feature | Sway | Hyprland |
+|---------|------|----------|
+| Layer-shell | ✅ | ✅ |
+| Alt+Tab hiding | ✅ | ✅ |
+| grim hiding | ❌ | ✅ (with layerrule) |
+| PipeWire hiding | ❌ | ✅ (with layerrule) |
 
-start() {
-    [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null && {
-        notify-send "Stealth Mirror" "Already running"
-        return
-    }
+**If you need full stealth, use Hyprland.**
 
-    MAIN=$(swaymsg -t get_outputs -r | jq -r \
-        '.[] | select(.active and .name != "HEADLESS-1") | .name' | head -1)
+---
 
-    [ -z "$MAIN" ] && { notify-send "Error" "No output found"; exit 1; }
+## Fallback: Share Specific Window
 
-    swaymsg create_output
-    sleep 0.3
-    wl-mirror --fullscreen --fullscreen-output "$HEADLESS" "$MAIN" &
-    echo $! > "$PID_FILE"
+If you can't use Hyprland, share a **specific window** instead of entire screen:
 
-    notify-send "Stealth Mirror" "Share '$HEADLESS' in Zoom/Meet"
-}
-
-stop() {
-    [ -f "$PID_FILE" ] && {
-        kill "$(cat "$PID_FILE")" 2>/dev/null
-        rm -f "$PID_FILE"
-    }
-    swaymsg output "$HEADLESS" unplug 2>/dev/null
-    notify-send "Stealth Mirror" "Stopped"
-}
-
-case "${1:-start}" in
-    start)  start ;;
-    stop)   stop ;;
-    toggle) [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null && stop || start ;;
-esac
-```
-
-```bash
-chmod +x ~/.config/sway/scripts/stealth-mirror.sh
-```
-
-### 3. Add Sway Config
-
-Add to `~/.config/sway/config`:
-
-```bash
-# Stealth mirror hotkey
-bindsym $mod+Shift+m exec ~/.config/sway/scripts/stealth-mirror.sh toggle
-
-# Virtual monitor settings (when created)
-output HEADLESS-1 resolution 1920x1080 position 0 1080 bg #000000 solid_color
-```
-
-### 4. Usage
-
-**Before meeting:**
-```bash
-~/.config/sway/scripts/stealth-mirror.sh start
-# Or press Mod+Shift+M
-```
-
-**In Zoom/Meet:**
+**Zoom:**
 1. Click "Share Screen"
-2. Select **HEADLESS-1** (not your main monitor)
-3. ShyQuiet is invisible to participants
+2. Select **"Window"** tab
+3. Choose browser/IDE window
+4. ShyQuiet overlay not captured
 
-**After meeting:**
-```bash
-~/.config/sway/scripts/stealth-mirror.sh stop
-```
+**Google Meet:**
+1. Click "Present now"
+2. Choose **"A window"**
+3. Select target window
+
+**Teams:**
+1. Click "Share"
+2. Choose **"Window"**
 
 ---
 
-## Why It Works
+## Additional Hyprland Rules (Optional)
 
-```
-Your Monitor (eDP-1)              Virtual Monitor (HEADLESS-1)
-┌─────────────────────┐           ┌─────────────────────┐
-│  [Browser]          │           │  [Browser]          │
-│                     │  ──────►  │                     │
-│  🤫 ShyQuiet        │  wl-mirror│  (no overlay)       │
-│  (Layer::Overlay)   │           │                     │
-└─────────────────────┘           └─────────────────────┘
-                                           ▲
-                                  Zoom shares this
-```
+```ini
+# Required: Hide from screen share
+layerrule = no_screen_share, shyquiet-stealth
 
-`wl-mirror` uses `wlr-screencopy` protocol which **excludes Overlay layer by design**.
+# Optional: Add blur behind ShyQuiet
+layerrule = blur, shyquiet-stealth
+layerrule = ignorealpha 0.3, shyquiet-stealth
+
+# Optional: Disable animations for instant appear/disappear
+layerrule = noanim, shyquiet-stealth
+```
 
 ---
 
 ## Troubleshooting
 
-**Check HEADLESS-1 exists:**
+**ShyQuiet still visible in screenshots:**
 ```bash
-swaymsg -t get_outputs | jq '.[].name'
+# Check namespace is set correctly
+hyprctl layers | grep shyquiet
+# Should show: shyquiet-stealth
 ```
 
-**Verify overlay is hidden:**
+**Rule not working:**
 ```bash
-grim -o HEADLESS-1 /tmp/test.png && xdg-open /tmp/test.png
-# ShyQuiet should NOT appear
+# Verify Hyprland version (need 0.40+)
+hyprctl version
 ```
 
-**wl-mirror not found:**
-```bash
-which wl-mirror || echo "Install wl-mirror first"
-```
+**No layer-shell on GNOME:**
+- GNOME doesn't support `wlr-layer-shell`
+- ShyQuiet runs as normal window
+- Use "Share Window" for pseudo-stealth
 
+---
+
+## Summary
+
+| Scenario | Solution |
+|----------|----------|
+| Using Hyprland | Add `layerrule = no_screen_share, shyquiet-stealth` |
+| Using Sway | Share window, not screen |
+| Using GNOME | Share window, not screen |
+| Need full stealth + Sway | Switch to Hyprland |

@@ -7,15 +7,16 @@
 //! Layer-shell initialization for stealth mode
 //!
 //! Configures the window as an invisible overlay that:
-//! - Is NOT captured by wlr-screencopy tools (grim, slurp)
 //! - Does not appear in window lists (Alt+Tab, taskbar)
 //! - Floats above other windows
+//! - Uses namespace "shyquiet-stealth" for compositor rules
 //!
-//! IMPORTANT: PipeWire-based capture (Zoom, Meet, OBS) WILL capture this window.
-//! For full stealth during screen share, use virtual monitor setup.
-//! See docs/STEALTH_GUIDE.md for details.
+//! STEALTH SUPPORT BY COMPOSITOR:
+//! - Hyprland: Full stealth with `layerrule = no_screen_share, shyquiet-stealth` (v0.52.0+)
+//! - Sway: Partial (hidden from Alt+Tab, but visible in screenshots)
+//! - GNOME/X11: No stealth (layer-shell not supported)
 //!
-//! Fallback for GNOME/X11: normal window (share specific window for pseudo-stealth)
+//! See docs/STEALTH_GUIDE.md for setup instructions.
 
 use gtk4::ApplicationWindow;
 
@@ -53,8 +54,9 @@ pub fn init(window: &ApplicationWindow) {
 
     window.init_layer_shell();
 
-    // Layer::Overlay — not captured by wlr-screencopy (grim)
-    // NOTE: PipeWire-based capture (Zoom/Meet) WILL see this layer
+    // Layer::Overlay — floats above all windows
+    // Stealth: Hyprland supports `layerrule = no_screen_share` to hide from capture
+    // Sway: visible in screenshots (no filtering support)
     window.set_layer(Layer::Overlay);
 
     // KeyboardMode::None — HUD mode: no auto-focus, type freely in windows below

@@ -6,9 +6,10 @@
 
 //! Screenshot capture for Wayland/X11
 //!
-//! Stealth-safe on wlr-layer-shell compositors (Sway, Hyprland):
-//! - slurp uses layer-shell Overlay
-//! - grim captures only normal windows → ShyQuiet not captured
+//! Stealth behavior:
+//! - Hyprland: ShyQuiet invisible with `layerrule = no_screen_share` (see STEALTH_GUIDE.md)
+//! - Sway: ShyQuiet WILL appear in screenshots (no layer filtering support)
+//! - Selection UI (slurp overlay) is always invisible during screen share
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use std::fs;
