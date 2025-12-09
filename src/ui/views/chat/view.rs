@@ -13,7 +13,8 @@
 use super::{audio, messaging};
 use crate::core::api::groq::ImageData;
 use crate::core::audio::{AudioRecorder, ListenRecorder};
-use crate::core::state::AppState;
+use crate::core::state::{AppState, Conversation};
+use chrono::Utc;
 use gtk4::prelude::*;
 use gtk4::{
     Box as GtkBox, Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, TextView,
@@ -97,6 +98,15 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
     });
 
     vbox
+}
+
+/// Refresh chat display from external call (e.g., after loading from history)
+pub fn refresh_display(state: &AppState) {
+    CHAT_STATE.with(|s| {
+        if let Some(shared) = s.borrow().as_ref() {
+            messaging::update_chat_display(&shared.chat_view, state);
+        }
+    });
 }
 
 /// Build interactive input area (control panel - receives input)
@@ -238,7 +248,62 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
         });
     }
 
-    // 🗑️ Clear
+    // 💾 Save to history
+    let save_btn = Button::with_label("💾");
+    save_btn.set_tooltip_text(Some("Save to history"));
+    {
+        let state_c = state.clone();
+        let status_c = status_label.clone();
+
+        save_btn.connect_clicked(move |_| {
+            let mut state_mut = state_c.borrow_mut();
+            if state_mut.current_messages.is_empty() {
+                status_c.set_text("⚠️ Nothing to save");
+                status_c.set_visible(true);
+                return;
+            }
+
+            // Generate title from first user message (max 50 chars)
+            let title = state_mut
+                .current_messages
+                .iter()
+                .find(|m| m.role == "user")
+                .map(|m| {
+                    let trimmed: String = m.content.chars().take(50).collect();
+                    if m.content.chars().count() > 50 {
+                        format!("{}...", trimmed)
+                    } else {
+                        trimmed
+                    }
+                })
+                .unwrap_or_else(|| "Untitled".to_string());
+
+            // Generate unique ID and timestamp
+            let now = Utc::now();
+            let id = now.timestamp_millis().to_string();
+            let created_at = now.format("%Y-%m-%d %H:%M").to_string();
+
+            // Create conversation and save
+            let conv = Conversation {
+                id,
+                title,
+                messages: state_mut.current_messages.clone(),
+                created_at,
+            };
+
+            state_mut.history.push(conv);
+            if let Err(e) = state_mut.save() {
+                tracing::error!("Failed to save history: {}", e);
+                status_c.set_text("❌ Save failed");
+                status_c.set_visible(true);
+            } else {
+                status_c.set_text("✅ Saved to history");
+                status_c.set_visible(true);
+            }
+        });
+    }
+
+    // 🗑️ Clear (silent, no confirmation)
     let clear_btn = Button::with_label("🗑️");
     clear_btn.set_tooltip_text(Some("Clear chat"));
     {
@@ -246,11 +311,13 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
         let chat_view_c = chat_view.clone();
         let image_c = attached_image.clone();
         let attach_label_c = attachment_label.clone();
+        let entry_c = entry.clone();
 
         clear_btn.connect_clicked(move |_| {
             state_c.borrow_mut().current_messages.clear();
             *image_c.borrow_mut() = None;
             attach_label_c.set_visible(false);
+            entry_c.set_text("");
             messaging::update_chat_display(&chat_view_c, &state_c.borrow());
         });
     }
@@ -259,6 +326,7 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
     buttons_box.append(&listen_btn);
     buttons_box.append(&area_btn);
     buttons_box.append(&screenshot_btn);
+    buttons_box.append(&save_btn);
     buttons_box.append(&clear_btn);
     vbox.append(&buttons_box);
 

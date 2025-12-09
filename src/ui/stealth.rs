@@ -139,8 +139,8 @@ fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) ->
         .page(&settings)
         .set_icon_name(Some("emblem-system-symbolic"));
 
-    // History view
-    let history = views::history::build(state.clone());
+    // History view (needs stack reference for navigation)
+    let history = views::history::build(state.clone(), &stack);
     stack.add_titled(&history, Some("history"), "History");
     stack
         .page(&history)

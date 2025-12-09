@@ -14,4 +14,4 @@ mod audio;
 mod messaging;
 mod view;
 
-pub use view::{build_content, build_input};
+pub use view::{build_content, build_input, refresh_display};
