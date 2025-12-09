@@ -80,8 +80,8 @@ pub struct AppState {
     pub settings: Settings,
     pub history: Vec<Conversation>,
     pub prompts: Vec<SystemPrompt>,
-    #[serde(default)]
-    pub active_prompt_id: Option<String>,
+    /// Active prompt IDs (multiple prompts combined for AI)
+    pub active_prompt_ids: Vec<String>,
     #[serde(skip)]
     pub current_messages: Vec<Message>,
 }
@@ -92,7 +92,7 @@ impl Default for AppState {
             settings: Settings::default(),
             history: Vec::new(),
             prompts: vec![SystemPrompt::default()],
-            active_prompt_id: None,
+            active_prompt_ids: vec!["default".to_string()],
             current_messages: Vec::new(),
         }
     }
@@ -140,22 +140,31 @@ impl AppState {
         !self.settings.api_key.is_empty()
     }
 
-    /// Get active system prompt content
-    pub fn active_prompt(&self) -> &str {
-        self.active_prompt_id
-            .as_ref()
-            .and_then(|id| self.prompts.iter().find(|p| p.id == *id))
-            .or_else(|| self.prompts.first())
+    /// Get combined active system prompts content
+    pub fn active_prompt(&self) -> String {
+        self.prompts
+            .iter()
+            .filter(|p| self.active_prompt_ids.contains(&p.id))
             .map(|p| p.content.as_str())
-            .unwrap_or("You are a helpful AI assistant.")
+            .collect::<Vec<_>>()
+            .join("\n\n")
     }
 
-    /// Get active prompt index (for UI)
-    pub fn active_prompt_index(&self) -> usize {
-        self.active_prompt_id
-            .as_ref()
-            .and_then(|id| self.prompts.iter().position(|p| p.id == *id))
-            .unwrap_or(0)
+    /// Check if prompt is active
+    pub fn is_prompt_active(&self, id: &str) -> bool {
+        self.active_prompt_ids.iter().any(|i| i == id)
+    }
+
+    /// Toggle prompt active state
+    pub fn toggle_prompt(&mut self, id: &str) {
+        if let Some(pos) = self.active_prompt_ids.iter().position(|i| i == id) {
+            // Don't allow deactivating the last prompt
+            if self.active_prompt_ids.len() > 1 {
+                self.active_prompt_ids.remove(pos);
+            }
+        } else {
+            self.active_prompt_ids.push(id.to_string());
+        }
     }
 
     /// Add new prompt, returns its ID
@@ -176,10 +185,7 @@ impl AppState {
         }
         if let Some(pos) = self.prompts.iter().position(|p| p.id == id) {
             self.prompts.remove(pos);
-            // Reset active if removed
-            if self.active_prompt_id.as_deref() == Some(id) {
-                self.active_prompt_id = self.prompts.first().map(|p| p.id.clone());
-            }
+            self.active_prompt_ids.retain(|i| i != id);
             return true;
         }
         false

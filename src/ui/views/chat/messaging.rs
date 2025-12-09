@@ -103,7 +103,7 @@ pub fn send_message(
         (
             s.settings.api_key.clone(),
             s.settings.model.clone(),
-            s.active_prompt().to_string(),
+            s.active_prompt(),
         )
     };
 
