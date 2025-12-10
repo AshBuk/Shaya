@@ -7,7 +7,7 @@
 //! Screenshot capture for Wayland/X11
 //!
 //! Stealth behavior:
-//! - Hyprland: ShyQuiet invisible with `layerrule = no_screen_share` (see STEALTH_GUIDE.md)
+//! - Hyprland: ShyQuiet invisible with `layerrule = noscreenshare` (see STEALTH_GUIDE.md)
 //! - Sway: ShyQuiet WILL appear in screenshots (no layer filtering support)
 //! - Selection UI (slurp overlay) is always invisible during screen share
 

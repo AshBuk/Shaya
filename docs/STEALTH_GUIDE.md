@@ -4,7 +4,7 @@
 
 | Compositor | Stealth Level | Notes |
 |------------|---------------|-------|
-| **Hyprland** | Full | `layerrule = no_screen_share, shyquiet-stealth` |
+| **Hyprland** | Full | `layerrule = noscreenshare, shyquiet-stealth` |
 | **Sway** | Partial | Hidden from Alt+Tab only |
 | **GNOME/X11** | None | Share specific window as workaround |
 
@@ -17,7 +17,7 @@
 Add this line to `~/.config/hypr/hyprland.conf`:
 
 ```ini
-layerrule = no_screen_share, shyquiet-stealth
+layerrule = noscreenshare, shyquiet-stealth
 ```
 
 **That's it.** ShyQuiet will be invisible in:
@@ -108,7 +108,7 @@ If you can't use Hyprland, share a **specific window** instead of entire screen:
 
 ```ini
 # Required: Hide from screen share
-layerrule = no_screen_share, shyquiet-stealth
+layerrule = noscreenshare, shyquiet-stealth
 
 # Optional: Add blur behind ShyQuiet
 layerrule = blur, shyquiet-stealth
@@ -146,7 +146,7 @@ hyprctl version
 
 | Scenario | Solution |
 |----------|----------|
-| Using Hyprland | Add `layerrule = no_screen_share, shyquiet-stealth` |
+| Using Hyprland | Add `layerrule = noscreenshare, shyquiet-stealth` |
 | Using Sway | Share window, not screen |
 | Using GNOME | Share window, not screen |
 | Need full stealth + Sway | Switch to Hyprland |
