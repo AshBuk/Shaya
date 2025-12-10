@@ -2,11 +2,11 @@
 
 ## TL;DR — How to Get Full Stealth
 
-| Compositor | Full Stealth | Setup |
-|------------|--------------|-------|
-| **Hyprland** | ✅ YES | Add one line to config |
-| **Sway** | ❌ No | Share window only |
-| **GNOME** | ❌ No | Share window only |
+| Compositor | Stealth Level | Notes |
+|------------|---------------|-------|
+| **Hyprland** | Full | `layerrule = no_screen_share, shyquiet-stealth` |
+| **Sway** | Partial | Hidden from Alt+Tab only |
+| **GNOME/X11** | None | Share specific window as workaround |
 
 **Hyprland is the only compositor that supports true stealth mode.**
 
