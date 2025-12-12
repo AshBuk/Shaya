@@ -59,22 +59,26 @@ pub fn init(window: &ApplicationWindow) {
     // Sway: visible in screenshots (no filtering support)
     window.set_layer(Layer::Overlay);
 
-    // KeyboardMode::None — HUD mode: no auto-focus, type freely in windows below
-    // Click inside the window to get keyboard focus when needed
-    window.set_keyboard_mode(KeyboardMode::None);
+    // KeyboardMode::OnDemand — get keyboard focus when clicked
+    window.set_keyboard_mode(KeyboardMode::OnDemand);
 
     // Exclusive zone -1: don't reserve screen space
     window.set_exclusive_zone(-1);
 
-    // Floating window (no anchors = can be positioned anywhere)
-    window.set_anchor(Edge::Left, false);
+    // Anchor to top-left for margin-based positioning (drag support)
+    // Margins control position: margin_left = X, margin_top = Y
+    window.set_anchor(Edge::Left, true);
+    window.set_anchor(Edge::Top, true);
     window.set_anchor(Edge::Right, false);
-    window.set_anchor(Edge::Top, false);
     window.set_anchor(Edge::Bottom, false);
 
-    window.set_namespace("shyquiet-stealth");
+    // Initial position (center-ish)
+    window.set_margin(Edge::Left, 100);
+    window.set_margin(Edge::Top, 100);
 
-    tracing::info!("Stealth mode enabled (layer-shell: Overlay, keyboard=None)");
+    window.set_namespace(Some("shyquiet-stealth"));
+
+    tracing::info!("Stealth mode enabled (layer-shell: Overlay, keyboard=OnDemand)");
 }
 
 /// Fallback for environments without layer-shell (GNOME, X11)
