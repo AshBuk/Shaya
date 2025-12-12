@@ -51,15 +51,20 @@ pub fn run() -> anyhow::Result<()> {
         build_ui(app, state);
     });
 
-    // SIGUSR1 handler: show window when another instance is launched
+    // SIGUSR1 handler: toggle window visibility
     #[cfg(unix)]
     {
         glib::unix_signal_add_local(nix::libc::SIGUSR1, || {
-            tracing::info!("SIGUSR1 received - showing window");
             MAIN_WINDOW.with(|w| {
                 if let Some(window) = w.borrow().as_ref() {
-                    window.set_visible(true);
-                    window.present();
+                    if window.is_visible() {
+                        tracing::info!("SIGUSR1 received - hiding window");
+                        window.set_visible(false);
+                    } else {
+                        tracing::info!("SIGUSR1 received - showing window");
+                        window.set_visible(true);
+                        window.present();
+                    }
                 }
             });
             glib::ControlFlow::Continue
