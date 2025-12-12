@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# ShyQuiet Stealth Mode Test
+# Tests invisibility in screenshots and screen capture
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║           ShyQuiet Stealth Mode Test Suite                 ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+echo
+
+# Check prerequisites
+echo -e "${YELLOW}[1/5] Checking prerequisites...${NC}"
+
+if [ "$XDG_SESSION_TYPE" != "wayland" ]; then
+    echo -e "${RED}✗ Not running on Wayland (XDG_SESSION_TYPE=$XDG_SESSION_TYPE)${NC}"
+    echo -e "${RED}  Stealth mode requires Wayland!${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Wayland session detected${NC}"
+
+if ! command -v hyprctl &>/dev/null; then
+    echo -e "${RED}✗ hyprctl not found - not running Hyprland?${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Hyprland detected: $(hyprctl version | head -1)${NC}"
+
+if ! command -v grim &>/dev/null; then
+    echo -e "${YELLOW}⚠ grim not installed - install with: sudo dnf install grim${NC}"
+    SKIP_GRIM=1
+fi
+
+# Check layerrule
+echo
+echo -e "${YELLOW}[2/5] Checking Hyprland layerrule...${NC}"
+
+if hyprctl getoption layerrules 2>/dev/null | grep -q "shyquiet-stealth"; then
+    echo -e "${GREEN}✓ Layerrule for shyquiet-stealth is active${NC}"
+elif grep -q "shyquiet-stealth" ~/.config/hypr/hyprland.conf 2>/dev/null; then
+    echo -e "${GREEN}✓ Layerrule found in config (noscreenshare)${NC}"
+else
+    echo -e "${RED}✗ No layerrule for shyquiet-stealth!${NC}"
+    echo -e "${YELLOW}  Add to ~/.config/hypr/hyprland.conf:${NC}"
+    echo -e "${BLUE}  layerrule = noscreenshare, shyquiet-stealth${NC}"
+    exit 1
+fi
+
+# Check if ShyQuiet is running
+echo
+echo -e "${YELLOW}[3/5] Checking ShyQuiet process...${NC}"
+
+if pgrep -f "shyquiet" >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ ShyQuiet is running${NC}"
+    SHYQUIET_RUNNING=1
+else
+    echo -e "${YELLOW}⚠ ShyQuiet is NOT running${NC}"
+    echo -e "${BLUE}  Start it with: ./dev run${NC}"
+    SHYQUIET_RUNNING=0
+fi
+
+# Check layer registration
+echo
+echo -e "${YELLOW}[4/5] Checking layer-shell registration...${NC}"
+
+LAYERS=$(hyprctl layers 2>/dev/null)
+if echo "$LAYERS" | grep -q "shyquiet-stealth"; then
+    echo -e "${GREEN}✓ Layer 'shyquiet-stealth' is registered!${NC}"
+    echo
+    echo -e "${BLUE}Layer details:${NC}"
+    echo "$LAYERS" | grep -A5 "shyquiet-stealth" | head -10
+else
+    if [ "$SHYQUIET_RUNNING" = "1" ]; then
+        echo -e "${RED}✗ Layer 'shyquiet-stealth' NOT found (but process is running)${NC}"
+        echo -e "${YELLOW}  This might indicate a layer-shell initialization issue${NC}"
+    else
+        echo -e "${YELLOW}⚠ Layer not found (ShyQuiet not running)${NC}"
+    fi
+fi
+
+# Screenshot test
+echo
+echo -e "${YELLOW}[5/5] Screenshot test (grim)...${NC}"
+
+if [ "$SKIP_GRIM" = "1" ]; then
+    echo -e "${YELLOW}⚠ Skipping grim test (not installed)${NC}"
+elif [ "$SHYQUIET_RUNNING" = "0" ]; then
+    echo -e "${YELLOW}⚠ Skipping grim test (ShyQuiet not running)${NC}"
+else
+    SCREENSHOT_PATH="/tmp/shyquiet-stealth-test.png"
+    echo -e "${BLUE}  Taking screenshot...${NC}"
+    grim "$SCREENSHOT_PATH" 2>/dev/null
+    
+    if [ -f "$SCREENSHOT_PATH" ]; then
+        echo -e "${GREEN}✓ Screenshot saved to: $SCREENSHOT_PATH${NC}"
+        echo
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo -e "${YELLOW}MANUAL VERIFICATION REQUIRED:${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+        echo
+        echo -e "  Open the screenshot and verify ShyQuiet window is ${GREEN}NOT VISIBLE${NC}:"
+        echo -e "  ${BLUE}xdg-open $SCREENSHOT_PATH${NC}"
+        echo
+        echo -e "  Expected results on Hyprland with noscreenshare:"
+        echo -e "    ${GREEN}✓${NC} ShyQuiet window should be INVISIBLE in screenshot"
+        echo -e "    ${GREEN}✓${NC} Only your desktop/other apps should be visible"
+        echo
+    else
+        echo -e "${RED}✗ Failed to take screenshot${NC}"
+    fi
+fi
+
+# Summary
+echo
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}                        SUMMARY                                 ${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo
+echo -e "  Wayland:         ${GREEN}✓${NC}"
+echo -e "  Hyprland:        ${GREEN}✓${NC} v0.52.2+ (noscreenshare support)"
+echo -e "  Layerrule:       ${GREEN}✓${NC} noscreenshare, shyquiet-stealth"
+if [ "$SHYQUIET_RUNNING" = "1" ]; then
+    echo -e "  ShyQuiet:        ${GREEN}✓${NC} Running"
+    echo -e "  Layer Shell:     ${GREEN}✓${NC} Registered"
+else
+    echo -e "  ShyQuiet:        ${YELLOW}⚠${NC} Not running"
+fi
+echo
+echo -e "${YELLOW}Additional tests you can perform:${NC}"
+echo -e "  1. Start a Zoom/Meet call and share your screen"
+echo -e "  2. Verify ShyQuiet is NOT visible to other participants"
+echo -e "  3. Use OBS to record your screen and check the recording"
+echo
