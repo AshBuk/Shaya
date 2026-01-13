@@ -6,6 +6,7 @@
 
 //! Messaging handlers - chat messages and screenshots
 
+use super::markdown;
 use crate::core::api::groq::ImageData;
 use crate::core::api::GroqClient;
 use crate::core::capture;
@@ -170,7 +171,7 @@ pub fn send_message(ctx: &ChatContext) {
     });
 }
 
-/// Update chat display with current messages
+/// Update chat display with current messages (with markdown rendering)
 pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
     let buffer = chat_view.buffer();
 
@@ -181,6 +182,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
         return;
     }
 
+    // Format messages with role prefixes
     let text: String = state
         .current_messages
         .iter()
@@ -190,13 +192,15 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
             } else {
                 "🤖 AI"
             };
-            format!("{}: {}", prefix, m.content)
+            format!("**{}:**\n{}", prefix, m.content)
         })
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    buffer.set_text(&text);
+    // Render with markdown formatting
+    markdown::render(&buffer, &text);
 
+    // Scroll to bottom
     if let Some(adj) = chat_view
         .parent()
         .and_then(|p| p.downcast::<ScrolledWindow>().ok())

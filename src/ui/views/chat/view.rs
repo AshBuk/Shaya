@@ -10,15 +10,15 @@
 //! - `build_content` - read-only content (passthrough area)
 //! - `build_input` - interactive controls (control panel)
 
-use super::{audio, messaging};
+use super::{audio, markdown, messaging};
 use crate::core::api::groq::ImageData;
 use crate::core::audio::{AudioRecorder, ListenRecorder};
 use crate::core::state::{AppState, Conversation};
 use chrono::Utc;
 use gtk4::prelude::*;
 use gtk4::{
-    Box as GtkBox, Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, TextView,
-    WrapMode,
+    Box as GtkBox, Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer,
+    TextView, WrapMode,
 };
 use libadwaita as adw;
 use std::cell::RefCell;
@@ -62,7 +62,10 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
     vbox.append(&attachment_label);
 
     // Chat display (read-only, but allows text selection)
-    let chat_view = TextView::new();
+    // Use TextBuffer with markdown tag table for formatting
+    let tag_table = markdown::create_tag_table();
+    let buffer = TextBuffer::new(Some(&tag_table));
+    let chat_view = TextView::with_buffer(&buffer);
     chat_view.set_editable(false);
     chat_view.set_cursor_visible(false);
     chat_view.set_wrap_mode(WrapMode::Word);
