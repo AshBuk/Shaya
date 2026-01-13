@@ -17,6 +17,18 @@ use gtk4::{Button, Entry, Label, ScrolledWindow, TextView};
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Chat context containing all widgets needed for messaging
+#[derive(Clone)]
+pub struct ChatContext {
+    pub entry: Entry,
+    pub state: Rc<RefCell<AppState>>,
+    pub chat_view: TextView,
+    pub status_label: Label,
+    pub send_btn: Button,
+    pub image: Rc<RefCell<Option<ImageData>>>,
+    pub attach_label: Label,
+}
+
 /// Handle area selection button click (slurp + grim)
 pub fn handle_area_capture_click(
     image: &Rc<RefCell<Option<ImageData>>>,
@@ -78,26 +90,17 @@ pub fn handle_screenshot_click(
 }
 
 /// Send message to AI
-#[allow(clippy::too_many_arguments)]
-pub fn send_message(
-    entry: &Entry,
-    state: &Rc<RefCell<AppState>>,
-    chat_view: &TextView,
-    status_label: &Label,
-    send_btn: &Button,
-    image: &Rc<RefCell<Option<ImageData>>>,
-    attach_label: &Label,
-) {
-    let text = entry.text();
+pub fn send_message(ctx: &ChatContext) {
+    let text = ctx.entry.text();
     if text.is_empty() {
         return;
     }
 
     let (api_key, model, system_prompt) = {
-        let s = state.borrow();
+        let s = ctx.state.borrow();
         if s.settings.api_key.is_empty() {
-            status_label.set_text("⚠️ Set API key in Settings");
-            status_label.set_visible(true);
+            ctx.status_label.set_text("⚠️ Set API key in Settings");
+            ctx.status_label.set_visible(true);
             return;
         }
         (
@@ -108,8 +111,8 @@ pub fn send_message(
     };
 
     // Take the attached image (if any)
-    let attached = image.borrow_mut().take();
-    attach_label.set_visible(false);
+    let attached = ctx.image.borrow_mut().take();
+    ctx.attach_label.set_visible(false);
 
     // Add user message
     let has_image = attached.is_some();
@@ -119,26 +122,20 @@ pub fn send_message(
         text.to_string()
     };
 
-    {
-        state.borrow_mut().current_messages.push(Message {
-            role: "user".to_string(),
-            content: user_content,
-        });
-    }
+    ctx.state.borrow_mut().current_messages.push(Message {
+        role: "user".to_string(),
+        content: user_content,
+    });
 
-    update_chat_display(chat_view, &state.borrow());
-    entry.set_text("");
+    update_chat_display(&ctx.chat_view, &ctx.state.borrow());
+    ctx.entry.set_text("");
 
-    send_btn.set_sensitive(false);
-    status_label.set_text("⏳ Thinking...");
-    status_label.set_visible(true);
+    ctx.send_btn.set_sensitive(false);
+    ctx.status_label.set_text("⏳ Thinking...");
+    ctx.status_label.set_visible(true);
 
-    let messages: Vec<Message> = state.borrow().current_messages.clone();
-
-    let state_c = state.clone();
-    let chat_view_c = chat_view.clone();
-    let status_c = status_label.clone();
-    let send_btn_c = send_btn.clone();
+    let messages: Vec<Message> = ctx.state.borrow().current_messages.clone();
+    let ctx_c = ctx.clone();
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
@@ -151,23 +148,23 @@ pub fn send_message(
 
         match result {
             Ok(Ok(response)) => {
-                state_c.borrow_mut().current_messages.push(Message {
+                ctx_c.state.borrow_mut().current_messages.push(Message {
                     role: "assistant".to_string(),
                     content: response,
                 });
-                update_chat_display(&chat_view_c, &state_c.borrow());
-                status_c.set_visible(false);
-                send_btn_c.set_sensitive(true);
+                update_chat_display(&ctx_c.chat_view, &ctx_c.state.borrow());
+                ctx_c.status_label.set_visible(false);
+                ctx_c.send_btn.set_sensitive(true);
             }
             Ok(Err(e)) => {
                 tracing::error!("API error: {}", e);
-                status_c.set_text(&format!("❌ {}", e));
-                send_btn_c.set_sensitive(true);
+                ctx_c.status_label.set_text(&format!("❌ {}", e));
+                ctx_c.send_btn.set_sensitive(true);
             }
             Err(e) => {
                 tracing::error!("Task join error: {:?}", e);
-                status_c.set_text("❌ Request failed");
-                send_btn_c.set_sensitive(true);
+                ctx_c.status_label.set_text("❌ Request failed");
+                ctx_c.send_btn.set_sensitive(true);
             }
         }
     });

@@ -138,48 +138,30 @@ pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> Gtk
     send_btn.add_css_class("suggested-action");
     send_btn.set_tooltip_text(Some("Send message"));
 
+    // Chat context for send handlers
+    let chat_ctx = messaging::ChatContext {
+        entry: entry.clone(),
+        state: state.clone(),
+        chat_view: chat_view.clone(),
+        status_label: status_label.clone(),
+        send_btn: send_btn.clone(),
+        image: attached_image.clone(),
+        attach_label: attachment_label.clone(),
+    };
+
     // Send handler
     {
-        let entry_c = entry.clone();
-        let state_c = state.clone();
-        let chat_view_c = chat_view.clone();
-        let status_c = status_label.clone();
-        let send_btn_c = send_btn.clone();
-        let image_c = attached_image.clone();
-        let attach_label_c = attachment_label.clone();
-
+        let ctx = chat_ctx.clone();
         send_btn.connect_clicked(move |_| {
-            messaging::send_message(
-                &entry_c,
-                &state_c,
-                &chat_view_c,
-                &status_c,
-                &send_btn_c,
-                &image_c,
-                &attach_label_c,
-            );
+            messaging::send_message(&ctx);
         });
     }
 
     // Enter key handler
     {
-        let state_c = state.clone();
-        let chat_view_c = chat_view.clone();
-        let status_c = status_label.clone();
-        let send_btn_c = send_btn.clone();
-        let image_c = attached_image.clone();
-        let attach_label_c = attachment_label.clone();
-
-        entry.connect_activate(move |entry| {
-            messaging::send_message(
-                entry,
-                &state_c,
-                &chat_view_c,
-                &status_c,
-                &send_btn_c,
-                &image_c,
-                &attach_label_c,
-            );
+        let ctx = chat_ctx.clone();
+        entry.connect_activate(move |_| {
+            messaging::send_message(&ctx);
         });
     }
 
