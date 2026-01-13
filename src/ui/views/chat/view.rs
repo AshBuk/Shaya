@@ -74,6 +74,10 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
     chat_view.set_bottom_margin(8);
     chat_view.set_left_margin(8);
     chat_view.set_right_margin(8);
+    // Compact line spacing (code blocks need this)
+    chat_view.set_pixels_above_lines(0);
+    chat_view.set_pixels_below_lines(0);
+    chat_view.set_pixels_inside_wrap(0);
 
     // ScrolledWindow handles mouse scroll events
     let scroll = ScrolledWindow::builder()

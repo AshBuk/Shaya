@@ -20,7 +20,7 @@ use gtk4::{TextBuffer, TextTag, TextTagTable};
 pub fn create_tag_table() -> TextTagTable {
     let table = TextTagTable::new();
 
-    // Code block: dark background, monospace, padding
+    // Code block: dark background, monospace, compact lines
     let code_block = TextTag::builder()
         .name("code-block")
         .family("monospace")
@@ -29,8 +29,9 @@ pub fn create_tag_table() -> TextTagTable {
         .paragraph_background("#1e1e1e")
         .left_margin(12)
         .right_margin(12)
-        .pixels_above_lines(6)
-        .pixels_below_lines(6)
+        .pixels_above_lines(0)
+        .pixels_below_lines(0)
+        .pixels_inside_wrap(0)
         .build();
     table.add(&code_block);
 
