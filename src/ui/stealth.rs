@@ -6,13 +6,10 @@
 
 //! Stealth Window - GTK4 + Layer-Shell
 //!
-//! Main application window with stealth features:
-//! - NON_UNIQUE: No D-Bus registration (ghost mode)
-//! - Lock file: Single instance without D-Bus
-//! - Layer::Overlay: Hidden from wlr-screencopy (grim)
+//! Single-instance window with layer-shell namespace "shyquiet-stealth".
+//! Configure compositor rules to control screen share visibility.
 //!
-//! NOTE: PipeWire capture (Zoom/Meet/OBS) sees this window.
-//! See docs/STEALTH_GUIDE.md for virtual monitor workaround.
+//! See docs/STEALTH_GUIDE.md for setup.
 
 use super::{header, layer_shell, views};
 use crate::core::lock;

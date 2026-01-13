@@ -4,19 +4,12 @@
 //
 // https://github.com/AshBuk/ShyQuiet
 
-//! Layer-shell initialization for stealth mode
+//! Layer-shell initialization for stealth mode.
 //!
-//! Configures the window as an invisible overlay that:
-//! - Does not appear in window lists (Alt+Tab, taskbar)
-//! - Floats above other windows
-//! - Uses namespace "shyquiet-stealth" for compositor rules
+//! Uses wlr-layer-shell protocol with namespace "shyquiet-stealth".
+//! Compositor rules can target this namespace for stealth behavior.
 //!
-//! STEALTH SUPPORT BY COMPOSITOR:
-//! - Hyprland: Full stealth with `layerrule = noscreenshare, shyquiet-stealth` (v0.52.0+)
-//! - Sway: Partial (hidden from Alt+Tab, but visible in screenshots)
-//! - GNOME/X11: No stealth (layer-shell not supported)
-//!
-//! See docs/STEALTH_GUIDE.md for setup instructions.
+//! See docs/STEALTH_GUIDE.md for compositor configuration.
 
 use gtk4::ApplicationWindow;
 
@@ -54,9 +47,7 @@ pub fn init(window: &ApplicationWindow) {
 
     window.init_layer_shell();
 
-    // Layer::Overlay — floats above all windows
-    // Stealth: Hyprland supports `layerrule = noscreenshare` to hide from capture
-    // Sway: visible in screenshots (no filtering support)
+    // Overlay layer: floats above all windows, hidden from Alt+Tab
     window.set_layer(Layer::Overlay);
 
     // KeyboardMode::OnDemand — get keyboard focus when clicked
