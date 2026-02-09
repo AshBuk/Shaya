@@ -20,9 +20,13 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
-    /// Create a new audio recorder
+    /// Create a new audio recorder (default temp path)
     pub fn new() -> Self {
-        let output_path = std::env::temp_dir().join("shyquiet_recording.wav");
+        Self::with_path(std::env::temp_dir().join("shyquiet_recording.wav"))
+    }
+
+    /// Create a new audio recorder with custom output path
+    pub fn with_path(output_path: PathBuf) -> Self {
         Self {
             process: None,
             output_path,
@@ -45,7 +49,7 @@ impl AudioRecorder {
         let _ = fs::remove_file(&self.output_path);
 
         // Try pw-record first (PipeWire), fallback to parecord (PulseAudio)
-        let (cmd, args) = if Self::command_exists("pw-record") {
+        let (cmd, args) = if super::command_exists("pw-record") {
             (
                 "pw-record",
                 vec![
@@ -55,7 +59,7 @@ impl AudioRecorder {
                     self.output_path.to_string_lossy().to_string(),
                 ],
             )
-        } else if Self::command_exists("parecord") {
+        } else if super::command_exists("parecord") {
             (
                 "parecord",
                 vec![
@@ -126,16 +130,6 @@ impl AudioRecorder {
         } else {
             Err("Recording file not found".to_string())
         }
-    }
-
-    fn command_exists(cmd: &str) -> bool {
-        Command::new("which")
-            .arg(cmd)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
     }
 }
 

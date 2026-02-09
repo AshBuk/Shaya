@@ -23,9 +23,13 @@ pub struct ListenRecorder {
 }
 
 impl ListenRecorder {
-    /// Create a new listen recorder
+    /// Create a new listen recorder (default temp path)
     pub fn new() -> Self {
-        let output_path = std::env::temp_dir().join("shyquiet_listen.wav");
+        Self::with_path(std::env::temp_dir().join("shyquiet_listen.wav"))
+    }
+
+    /// Create a new listen recorder with custom output path
+    pub fn with_path(output_path: PathBuf) -> Self {
         Self {
             process: None,
             output_path,
@@ -112,7 +116,7 @@ impl ListenRecorder {
         let output = self.output_path.to_string_lossy().to_string();
 
         // Prefer parecord for monitor sources (better PulseAudio compatibility)
-        if Self::command_exists("parecord") {
+        if super::command_exists("parecord") {
             if let Some(monitor) = Self::find_pulse_monitor() {
                 return Ok((
                     "parecord",
@@ -129,7 +133,7 @@ impl ListenRecorder {
         }
 
         // Fallback to PipeWire native
-        if Self::command_exists("pw-record") {
+        if super::command_exists("pw-record") {
             if let Some(monitor) = Self::find_pipewire_monitor() {
                 return Ok((
                     "pw-record",
@@ -221,16 +225,6 @@ impl ListenRecorder {
         }
 
         None
-    }
-
-    fn command_exists(cmd: &str) -> bool {
-        Command::new("which")
-            .arg(cmd)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
     }
 }
 

@@ -21,6 +21,9 @@ pub struct Settings {
     pub dark_mode: bool,
     #[serde(default = "default_opacity")]
     pub window_opacity: f64,
+    /// Whether to also record microphone during meetings
+    #[serde(default)]
+    pub meeting_record_mic: bool,
 }
 
 fn default_opacity() -> f64 {
@@ -36,6 +39,7 @@ impl Default for Settings {
             stt_model: "whisper-large-v3-turbo".to_string(),
             dark_mode: true,
             window_opacity: 1.0,
+            meeting_record_mic: false,
         }
     }
 }
