@@ -82,6 +82,10 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     prompts_btn.set_tooltip_text(Some("Prompts"));
     prompts_btn.set_group(Some(&chat_btn));
 
+    let meetings_btn = ToggleButton::with_label("⏺");
+    meetings_btn.set_tooltip_text(Some("Meetings"));
+    meetings_btn.set_group(Some(&chat_btn));
+
     // Connect to stack
     let stack_c = stack.clone();
     chat_btn.connect_toggled(move |btn| {
@@ -111,10 +115,18 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
         }
     });
 
+    let stack_c = stack.clone();
+    meetings_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            stack_c.set_visible_child_name("meetings");
+        }
+    });
+
     nav.append(&chat_btn);
     nav.append(&settings_btn);
     nav.append(&history_btn);
     nav.append(&prompts_btn);
+    nav.append(&meetings_btn);
 
     nav
 }

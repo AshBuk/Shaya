@@ -167,6 +167,13 @@ fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) ->
         .page(&prompts)
         .set_icon_name(Some("accessories-text-editor-symbolic"));
 
+    // Meetings view
+    let meetings = views::meetings::build(state.clone(), &stack);
+    stack.add_titled(&meetings, Some("meetings"), "Meetings");
+    stack
+        .page(&meetings)
+        .set_icon_name(Some("media-record-symbolic"));
+
     stack
 }
 
