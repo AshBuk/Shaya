@@ -66,7 +66,7 @@ pub fn build(
     header
 }
 
-/// Build navigation buttons (💬 ⚙️ 📜 📝)
+/// Build navigation buttons (💬 ⚙️ 📝 📜 ⏺)
 fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     let nav = GtkBox::new(Orientation::Horizontal, 2);
     nav.add_css_class("linked");
@@ -79,13 +79,13 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     settings_btn.set_tooltip_text(Some("Settings"));
     settings_btn.set_group(Some(&chat_btn));
 
-    let history_btn = ToggleButton::with_label("📜");
-    history_btn.set_tooltip_text(Some("History"));
-    history_btn.set_group(Some(&chat_btn));
-
     let prompts_btn = ToggleButton::with_label("📝");
     prompts_btn.set_tooltip_text(Some("Prompts"));
     prompts_btn.set_group(Some(&chat_btn));
+
+    let history_btn = ToggleButton::with_label("📜");
+    history_btn.set_tooltip_text(Some("History"));
+    history_btn.set_group(Some(&chat_btn));
 
     let meetings_btn = ToggleButton::with_label("⏺");
     meetings_btn.set_tooltip_text(Some("Meetings"));
@@ -107,16 +107,16 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     });
 
     let stack_c = stack.clone();
-    history_btn.connect_toggled(move |btn| {
+    prompts_btn.connect_toggled(move |btn| {
         if btn.is_active() {
-            stack_c.set_visible_child_name("history");
+            stack_c.set_visible_child_name("prompts");
         }
     });
 
     let stack_c = stack.clone();
-    prompts_btn.connect_toggled(move |btn| {
+    history_btn.connect_toggled(move |btn| {
         if btn.is_active() {
-            stack_c.set_visible_child_name("prompts");
+            stack_c.set_visible_child_name("history");
         }
     });
 
@@ -129,8 +129,8 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
 
     nav.append(&chat_btn);
     nav.append(&settings_btn);
-    nav.append(&history_btn);
     nav.append(&prompts_btn);
+    nav.append(&history_btn);
     nav.append(&meetings_btn);
 
     nav
