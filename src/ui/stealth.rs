@@ -24,9 +24,12 @@ use std::rc::Rc;
 
 const APP_ID: &str = "com.shyquiet.stealth";
 
-// Global window reference for SIGUSR1 handler
+// Global references for SIGUSR1 handler
 thread_local! {
     static MAIN_WINDOW: RefCell<Option<ApplicationWindow>> = const { RefCell::new(None) };
+    static MAIN_STATE: RefCell<Option<Rc<RefCell<AppState>>>> = const { RefCell::new(None) };
+    // Manual hidden state: minimize() doesn't change is_visible(), so we track it ourselves
+    static WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Run the stealth window application
@@ -54,14 +57,7 @@ pub fn run() -> anyhow::Result<()> {
         glib::unix_signal_add_local(nix::libc::SIGUSR1, || {
             MAIN_WINDOW.with(|w| {
                 if let Some(window) = w.borrow().as_ref() {
-                    if window.is_visible() {
-                        tracing::info!("SIGUSR1 received - hiding window");
-                        window.set_visible(false);
-                    } else {
-                        tracing::info!("SIGUSR1 received - showing window");
-                        window.set_visible(true);
-                        window.present();
-                    }
+                    toggle_window(window);
                 }
             });
             glib::ControlFlow::Continue
@@ -82,11 +78,15 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Build the main UI
 fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
+    let (window_width, window_height) = {
+        let s = state.borrow();
+        (s.settings.window_width, s.settings.window_height)
+    };
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ShyQuiet")
-        .default_width(400)
-        .default_height(550)
+        .default_width(window_width)
+        .default_height(window_height)
         .build();
 
     // Set minimum window size (allows flexible resizing)
@@ -94,14 +94,15 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 
     // Store for SIGUSR1 handler
     MAIN_WINDOW.with(|w| *w.borrow_mut() = Some(window.clone()));
+    MAIN_STATE.with(|s| *s.borrow_mut() = Some(state.clone()));
 
     // Initialize layer-shell (stealth mode)
-    layer_shell::init(&window);
+    layer_shell::init(&window, &state.borrow().settings);
 
     // Apply saved appearance settings
     apply_appearance_settings(&window, &state);
 
-    // Keyboard shortcut: Ctrl+Alt+S = toggle visibility
+    // Keyboard shortcut: Ctrl+Alt+A = hide window
     setup_keyboard_shortcuts(&window);
 
     // Build UI structure
@@ -111,7 +112,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     let stack = build_view_stack(&window, state.clone());
 
     // Header bar (navigation + drag handle)
-    let header = header::build(&window, &stack);
+    let header = header::build(&window, &stack, state.clone());
     main_box.append(&header);
 
     // Content area
@@ -121,7 +122,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     main_box.append(&content_box);
 
     // Control panel (chat input)
-    let control_panel = build_control_panel(&stack, state);
+    let control_panel = build_control_panel(&stack, state.clone());
     main_box.append(&control_panel);
 
     // Wrap in overlay for resize handle
@@ -129,7 +130,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     overlay.set_child(Some(&main_box));
 
     // Resize handle (bottom-right corner)
-    let resize_handle = build_resize_handle(&window);
+    let resize_handle = build_resize_handle(&window, state);
     overlay.add_overlay(&resize_handle);
 
     window.set_child(Some(&overlay));
@@ -199,7 +200,7 @@ fn build_control_panel(stack: &adw::ViewStack, state: Rc<RefCell<AppState>>) -> 
 }
 
 /// Build resize handle for bottom-right corner
-fn build_resize_handle(window: &ApplicationWindow) -> Label {
+fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> Label {
     let handle = Label::new(Some("⋱"));
     handle.set_halign(gtk4::Align::End);
     handle.set_valign(gtk4::Align::End);
@@ -231,6 +232,18 @@ fn build_resize_handle(window: &ApplicationWindow) -> Label {
         window_c.set_default_size(new_w, new_h);
     });
 
+    // Drag end: save size to state
+    let window_c = window.clone();
+    drag.connect_drag_end(move |_, _, _| {
+        let (w, h) = (window_c.width(), window_c.height());
+        let mut st = state.borrow_mut();
+        st.settings.window_width = w;
+        st.settings.window_height = h;
+        if let Err(e) = st.save() {
+            tracing::warn!("Failed to save window size: {}", e);
+        }
+    });
+
     handle.add_controller(drag);
     handle
 }
@@ -253,7 +266,66 @@ fn apply_appearance_settings(window: &ApplicationWindow, state: &Rc<RefCell<AppS
     }
 }
 
-/// Setup keyboard shortcuts
+/// Hide window: layer-shell uses set_visible, GNOME uses minimize to preserve position
+pub(crate) fn hide_window(window: &ApplicationWindow) {
+    WINDOW_HIDDEN.with(|h| h.set(true));
+
+    #[cfg(target_os = "linux")]
+    {
+        use gtk4_layer_shell::LayerShell;
+        if window.is_layer_window() {
+            tracing::info!("Hiding window (layer-shell)");
+            window.set_visible(false);
+            return;
+        }
+    }
+
+    tracing::info!("Hiding window (minimize)");
+    window.minimize();
+}
+
+/// Show window: layer-shell re-applies margins before present, GNOME just presents
+fn show_window(window: &ApplicationWindow) {
+    WINDOW_HIDDEN.with(|h| h.set(false));
+
+    #[cfg(target_os = "linux")]
+    {
+        use gtk4_layer_shell::LayerShell;
+        if window.is_layer_window() {
+            tracing::info!("Showing window (layer-shell)");
+            window.set_visible(true);
+
+            // Re-apply margins BEFORE present to avoid position flicker
+            MAIN_STATE.with(|s| {
+                if let Some(state) = s.borrow().as_ref() {
+                    use gtk4_layer_shell::Edge;
+                    let st = state.borrow();
+                    window.set_margin(Edge::Left, st.settings.window_x);
+                    window.set_margin(Edge::Top, st.settings.window_y);
+                }
+            });
+
+            window.present();
+            return;
+        }
+    }
+
+    tracing::info!("Showing window (unminimize+present)");
+    window.unminimize();
+    window.present();
+}
+
+/// Toggle window visibility (shared by SIGUSR1 and keyboard shortcut)
+fn toggle_window(window: &ApplicationWindow) {
+    let hidden = WINDOW_HIDDEN.with(|h| h.get());
+    if hidden {
+        show_window(window);
+    } else {
+        hide_window(window);
+    }
+}
+
+/// Setup keyboard shortcuts (only works when window is focused)
 fn setup_keyboard_shortcuts(window: &ApplicationWindow) {
     let controller = gtk4::EventControllerKey::new();
     let window_c = window.clone();
@@ -261,19 +333,12 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow) {
     controller.connect_key_pressed(move |_, key, _, modifiers| {
         use gtk4::gdk::{Key, ModifierType};
 
-        // Ctrl+Alt+S = toggle visibility
-        if key == Key::s
+        // Ctrl+Alt+A = hide window (show via SIGUSR1 / ./dev toggle)
+        if key == Key::a
             && modifiers.contains(ModifierType::CONTROL_MASK)
             && modifiers.contains(ModifierType::ALT_MASK)
         {
-            if window_c.is_visible() {
-                tracing::debug!("Ctrl+Alt+S - hiding window");
-                window_c.set_visible(false);
-            } else {
-                tracing::debug!("Ctrl+Alt+S - showing window");
-                window_c.set_visible(true);
-                window_c.present();
-            }
+            toggle_window(&window_c);
             return glib::Propagation::Stop;
         }
 
