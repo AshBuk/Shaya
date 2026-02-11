@@ -316,7 +316,7 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow) {
     controller.connect_key_pressed(move |_, key, _, modifiers| {
         use gtk4::gdk::{Key, ModifierType};
 
-        // Ctrl+Alt+A = hide window (show via SIGUSR1 / ./dev toggle)
+        // Ctrl+Alt+A = toggle window (show/hide via SIGUSR1 or re-run binary)
         if key == Key::a
             && modifiers.contains(ModifierType::CONTROL_MASK)
             && modifiers.contains(ModifierType::ALT_MASK)

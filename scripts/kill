@@ -1,9 +1,0 @@
-#!/bin/bash
-# Copyright 2025 Asher Buk
-#
-# SPDX-License-Identifier: Apache-2.0
-#
-# https://github.com/AshBuk/ShyQuiet
-
-# ShyQuiet - Stop all running instances
-pkill -f "shyquiet" && echo "ShyQuiet stopped" || echo "ShyQuiet is not running"

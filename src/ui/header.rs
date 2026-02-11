@@ -139,7 +139,7 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
 /// Build hide button
 fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
     let hide_btn = gtk4::Button::with_label("—");
-    hide_btn.set_tooltip_text(Some("Hide (Ctrl+Alt+A or ./dev toggle to show)"));
+    hide_btn.set_tooltip_text(Some("Hide (Ctrl+Alt+A or re-run binary to show)"));
     hide_btn.add_css_class("flat");
 
     let window_c = window.clone();
