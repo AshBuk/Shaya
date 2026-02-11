@@ -6,6 +6,7 @@
 
 //! Groq API client (blocking) with Vision support
 
+use super::ErrorResponse;
 use crate::core::models::{supports_vision, VISION_FALLBACK_MODEL};
 use crate::core::state::Message;
 use anyhow::Result;
@@ -34,16 +35,6 @@ struct Choice {
 #[derive(Deserialize)]
 struct ResponseMessage {
     content: String,
-}
-
-#[derive(Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Deserialize)]
-struct ErrorDetail {
-    message: String,
 }
 
 impl GroqClient {

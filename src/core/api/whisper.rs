@@ -6,6 +6,7 @@
 
 //! Whisper STT API client (Groq)
 
+use super::ErrorResponse;
 use anyhow::Result;
 use serde::Deserialize;
 use std::fs;
@@ -22,16 +23,6 @@ pub struct WhisperClient {
 #[derive(Deserialize)]
 struct TranscriptionResponse {
     text: String,
-}
-
-#[derive(Deserialize)]
-struct ErrorResponse {
-    error: ErrorDetail,
-}
-
-#[derive(Deserialize)]
-struct ErrorDetail {
-    message: String,
 }
 
 impl WhisperClient {
