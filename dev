@@ -15,6 +15,7 @@ if [ $# -eq 0 ]; then
     echo ""
     echo "  ./dev docker   # Docker build helper (interactive menu)"
     echo "  ./dev run      # Run ShyQuiet binary"
+    echo "  ./dev toggle   # Toggle visibility (show/hide)"
     echo "  ./dev debug    # Run with debug logging"
     echo "  ./dev logs     # View logs"
     echo "  ./dev kill     # Stop running instances"
@@ -27,7 +28,7 @@ COMMAND=$1
 shift
 
 case "$COMMAND" in
-    run|debug|logs|kill|docker|lint|fmt)
+    run|debug|logs|kill|docker|lint|fmt|toggle)
         if [ -f "$SCRIPTS_DIR/$COMMAND" ]; then
             exec "$SCRIPTS_DIR/$COMMAND" "$@"
         else
