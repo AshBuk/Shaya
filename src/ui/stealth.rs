@@ -109,7 +109,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
     // Create ViewStack first (needed by header for navigation)
-    let stack = build_view_stack(&window, state.clone());
+    let (stack, chat_shared) = build_view_stack(&window, state.clone());
 
     // Header bar (navigation + drag handle)
     let header = header::build(&window, &stack, state.clone());
@@ -122,7 +122,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     main_box.append(&content_box);
 
     // Control panel (chat input)
-    let control_panel = build_control_panel(&stack, state.clone());
+    let control_panel = build_control_panel(&stack, state.clone(), chat_shared);
     main_box.append(&control_panel);
 
     // Wrap in overlay for resize handle
@@ -138,12 +138,15 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 }
 
 /// Build ViewStack with all views
-fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> adw::ViewStack {
+fn build_view_stack(
+    window: &ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+) -> (adw::ViewStack, views::chat::ChatSharedState) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
 
     // Chat view
-    let chat = views::chat::build_content(state.clone());
+    let (chat, chat_shared) = views::chat::build_content(state.clone());
     stack.add_titled(&chat, Some("chat"), "Chat");
     stack.page(&chat).set_icon_name(Some("chat-symbolic"));
 
@@ -154,8 +157,8 @@ fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) ->
         .page(&settings)
         .set_icon_name(Some("emblem-system-symbolic"));
 
-    // History view (needs stack reference for navigation)
-    let history = views::history::build(state.clone(), &stack);
+    // History view (needs stack reference and chat_view for refresh)
+    let history = views::history::build(state.clone(), &stack, &chat_shared.chat_view);
     stack.add_titled(&history, Some("history"), "History");
     stack
         .page(&history)
@@ -175,11 +178,15 @@ fn build_view_stack(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) ->
         .page(&meetings)
         .set_icon_name(Some("media-record-symbolic"));
 
-    stack
+    (stack, chat_shared)
 }
 
 /// Build control panel (chat input area)
-fn build_control_panel(stack: &adw::ViewStack, state: Rc<RefCell<AppState>>) -> GtkBox {
+fn build_control_panel(
+    stack: &adw::ViewStack,
+    state: Rc<RefCell<AppState>>,
+    chat_shared: views::chat::ChatSharedState,
+) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 4);
     panel.set_margin_top(4);
     panel.set_margin_bottom(8);
@@ -187,7 +194,7 @@ fn build_control_panel(stack: &adw::ViewStack, state: Rc<RefCell<AppState>>) -> 
     panel.set_margin_end(8);
     panel.add_css_class("control-panel");
 
-    let input_area = views::chat::build_input(state, stack);
+    let input_area = views::chat::build_input(state, stack, chat_shared);
     panel.append(&input_area);
 
     // Show only when chat view is active

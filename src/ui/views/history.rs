@@ -9,14 +9,14 @@
 use super::chat;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::{Box as GtkBox, Button, PolicyType, ScrolledWindow};
+use gtk4::{Box as GtkBox, Button, PolicyType, ScrolledWindow, TextView};
 use libadwaita as adw;
 use libadwaita::prelude::MessageDialogExt;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Build the history view
-pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
+pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack, chat_view: &TextView) -> GtkBox {
     let vbox = GtkBox::new(gtk4::Orientation::Vertical, 0);
     vbox.set_vexpand(true);
 
@@ -25,15 +25,16 @@ pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
     content.set_vexpand(true);
     vbox.append(&content);
 
-    rebuild_content(&content, &state, stack);
+    rebuild_content(&content, &state, stack, chat_view);
 
     // Auto-refresh when view becomes visible
     let content_c = content.clone();
     let state_c = state.clone();
     let stack_c = stack.clone();
+    let chat_view_c = chat_view.clone();
     stack.connect_visible_child_name_notify(move |s| {
         if s.visible_child_name().as_deref() == Some("history") {
-            rebuild_content(&content_c, &state_c, &stack_c);
+            rebuild_content(&content_c, &state_c, &stack_c, &chat_view_c);
         }
     });
 
@@ -41,7 +42,12 @@ pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
 }
 
 /// Rebuild history content (called on refresh)
-fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &adw::ViewStack) {
+fn rebuild_content(
+    container: &GtkBox,
+    state: &Rc<RefCell<AppState>>,
+    stack: &adw::ViewStack,
+    chat_view: &TextView,
+) {
     // Clear existing children
     while let Some(child) = container.first_child() {
         container.remove(&child);
@@ -93,6 +99,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
                 let state_c = state.clone();
                 let container_c = container.clone();
                 let stack_c = stack.clone();
+                let chat_view_c = chat_view.clone();
 
                 delete_btn.connect_clicked(move |btn| {
                     let dialog = adw::MessageDialog::new(
@@ -110,6 +117,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
                     let state_cc = state_c.clone();
                     let container_cc = container_c.clone();
                     let stack_cc = stack_c.clone();
+                    let chat_view_cc = chat_view_c.clone();
 
                     dialog.connect_response(None, move |d, response| {
                         if response == "delete" {
@@ -121,7 +129,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
                                 }
                             }
                             drop(state_mut);
-                            rebuild_content(&container_cc, &state_cc, &stack_cc);
+                            rebuild_content(&container_cc, &state_cc, &stack_cc, &chat_view_cc);
                         }
                         d.close();
                     });
@@ -138,6 +146,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
             {
                 let state_c = state.clone();
                 let stack_c = stack.clone();
+                let chat_view_c = chat_view.clone();
                 let messages = conv.messages.clone();
 
                 row.connect_activated(move |_| {
@@ -148,7 +157,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, stack: &ad
                     stack_c.set_visible_child_name("chat");
 
                     // Refresh chat display
-                    chat::refresh_display(&state_c.borrow());
+                    chat::refresh_display(&chat_view_c, &state_c.borrow());
                 });
             }
 

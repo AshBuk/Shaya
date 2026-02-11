@@ -15,4 +15,5 @@ pub mod markdown;
 mod messaging;
 mod view;
 
+pub(crate) use view::ChatSharedState;
 pub use view::{build_content, build_input, refresh_display};

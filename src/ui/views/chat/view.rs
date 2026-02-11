@@ -24,14 +24,10 @@ use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// Shared state for chat (used across content and input)
-thread_local! {
-    static CHAT_STATE: RefCell<Option<ChatSharedState>> = const { RefCell::new(None) };
-}
-
+/// Shared state for chat (passed explicitly between content and input builders)
 #[derive(Clone)]
-struct ChatSharedState {
-    chat_view: TextView,
+pub(crate) struct ChatSharedState {
+    pub(crate) chat_view: TextView,
     status_label: Label,
     attachment_label: Label,
     attached_image: Rc<RefCell<Option<ImageData>>>,
@@ -40,7 +36,8 @@ struct ChatSharedState {
 }
 
 /// Build read-only content area (passthrough - clicks pass through)
-pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
+/// Returns the widget and shared state needed by `build_input` and `refresh_display`.
+pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) {
     let vbox = GtkBox::new(Orientation::Vertical, 4);
     vbox.set_margin_top(4);
     vbox.set_margin_start(8);
@@ -100,32 +97,21 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> GtkBox {
         listener: Rc::new(RefCell::new(ListenRecorder::new())),
     };
 
-    CHAT_STATE.with(|s| {
-        *s.borrow_mut() = Some(shared);
-    });
-
-    vbox
+    (vbox, shared)
 }
 
 /// Refresh chat display from external call (e.g., after loading from history)
-pub fn refresh_display(state: &AppState) {
-    CHAT_STATE.with(|s| {
-        if let Some(shared) = s.borrow().as_ref() {
-            messaging::update_chat_display(&shared.chat_view, state);
-        }
-    });
+pub fn refresh_display(chat_view: &TextView, state: &AppState) {
+    messaging::update_chat_display(chat_view, state);
 }
 
 /// Build interactive input area (control panel - receives input)
-pub fn build_input(state: Rc<RefCell<AppState>>, _stack: &adw::ViewStack) -> GtkBox {
+pub fn build_input(
+    state: Rc<RefCell<AppState>>,
+    _stack: &adw::ViewStack,
+    shared: ChatSharedState,
+) -> GtkBox {
     let vbox = GtkBox::new(Orientation::Vertical, 4);
-
-    // Get shared state (build_content must be called first)
-    let shared = CHAT_STATE.with(|s| s.borrow().clone());
-    let Some(shared) = shared else {
-        tracing::error!("build_content must be called before build_input");
-        return vbox;
-    };
 
     let chat_view = shared.chat_view;
     let status_label = shared.status_label;
