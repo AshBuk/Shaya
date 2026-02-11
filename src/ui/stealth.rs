@@ -266,36 +266,24 @@ fn apply_appearance_settings(window: &ApplicationWindow, state: &Rc<RefCell<AppS
     }
 }
 
-/// Hide window: layer-shell uses set_visible, GNOME uses minimize to preserve position
+/// Hide window (layer-shell and GNOME both use set_visible)
 pub(crate) fn hide_window(window: &ApplicationWindow) {
     WINDOW_HIDDEN.with(|h| h.set(true));
-
-    #[cfg(target_os = "linux")]
-    {
-        use gtk4_layer_shell::LayerShell;
-        if window.is_layer_window() {
-            tracing::info!("Hiding window (layer-shell)");
-            window.set_visible(false);
-            return;
-        }
-    }
-
-    tracing::info!("Hiding window (minimize)");
-    window.minimize();
+    tracing::info!("Hiding window");
+    window.set_visible(false);
 }
 
-/// Show window: layer-shell re-applies margins before present, GNOME just presents
+/// Show window: layer-shell re-applies margins, GNOME relies on compositor positioning
 fn show_window(window: &ApplicationWindow) {
     WINDOW_HIDDEN.with(|h| h.set(false));
+    tracing::info!("Showing window");
+    window.set_visible(true);
 
+    // Layer-shell: re-apply margins before present to avoid position flicker
     #[cfg(target_os = "linux")]
     {
         use gtk4_layer_shell::LayerShell;
         if window.is_layer_window() {
-            tracing::info!("Showing window (layer-shell)");
-            window.set_visible(true);
-
-            // Re-apply margins BEFORE present to avoid position flicker
             MAIN_STATE.with(|s| {
                 if let Some(state) = s.borrow().as_ref() {
                     use gtk4_layer_shell::Edge;
@@ -304,14 +292,9 @@ fn show_window(window: &ApplicationWindow) {
                     window.set_margin(Edge::Top, st.settings.window_y);
                 }
             });
-
-            window.present();
-            return;
         }
     }
 
-    tracing::info!("Showing window (unminimize+present)");
-    window.unminimize();
     window.present();
 }
 
