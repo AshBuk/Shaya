@@ -13,7 +13,7 @@ use crate::core::meeting::{Meeting, MeetingManager, MeetingStatus};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use super::command_exists;
+use crate::core::utils::command_exists;
 
 /// Orchestrates system audio + optional mic recording for meetings
 pub struct MeetingRecorder {

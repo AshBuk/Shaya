@@ -49,7 +49,7 @@ impl AudioRecorder {
         let _ = fs::remove_file(&self.output_path);
 
         // Try pw-record first (PipeWire), fallback to parecord (PulseAudio)
-        let (cmd, args) = if super::command_exists("pw-record") {
+        let (cmd, args) = if crate::core::utils::command_exists("pw-record") {
             (
                 "pw-record",
                 vec![
@@ -59,7 +59,7 @@ impl AudioRecorder {
                     self.output_path.to_string_lossy().to_string(),
                 ],
             )
-        } else if super::command_exists("parecord") {
+        } else if crate::core::utils::command_exists("parecord") {
             (
                 "parecord",
                 vec![

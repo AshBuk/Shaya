@@ -145,13 +145,7 @@ fn is_wayland() -> bool {
 }
 
 fn has_command(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::core::utils::command_exists(cmd)
 }
 
 fn take_wayland_screenshot(output: &Path) -> Result<(), String> {

@@ -116,7 +116,7 @@ impl ListenRecorder {
         let output = self.output_path.to_string_lossy().to_string();
 
         // Prefer parecord for monitor sources (better PulseAudio compatibility)
-        if super::command_exists("parecord") {
+        if crate::core::utils::command_exists("parecord") {
             if let Some(monitor) = Self::find_pulse_monitor() {
                 return Ok((
                     "parecord",
@@ -133,7 +133,7 @@ impl ListenRecorder {
         }
 
         // Fallback to PipeWire native
-        if super::command_exists("pw-record") {
+        if crate::core::utils::command_exists("pw-record") {
             if let Some(monitor) = Self::find_pipewire_monitor() {
                 return Ok((
                     "pw-record",

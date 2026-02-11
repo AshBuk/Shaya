@@ -13,3 +13,4 @@ pub mod lock;
 pub mod meeting;
 pub mod models;
 pub mod state;
+pub mod utils;
