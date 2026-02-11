@@ -31,6 +31,7 @@ ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to 
 │   │   │  - Settings View (API keys, models)         │   │   │
 │   │   │  - History View (conversations)             │   │   │
 │   │   │  - Prompts View (system prompts)            │   │   │
+│   │   │  - Meetings View (recordings, transcript)   │   │   │
 │   │   └─────────────────────────────────────────────┘   │   │
 │   │                                                     │   │
 │   │   Wayland: zwlr-layer-shell-v1 → INVISIBLE          │   │
@@ -41,8 +42,8 @@ ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to 
 │   │              RUST CORE                              │   │
 │   │                                                     │   │
 │   │   - Audio capture (PipeWire/PulseAudio)             │   │
-│   │   - Screenshot capture (grim/portal)                │   │
-│   │   - AI/STT API calls (reqwest)                      │   │
+│   │   - Screenshot capture (grim/gnome-screenshot/etc)  │   │
+│   │   - AI/STT API calls (ureq, blocking)               │   │
 │   │   - State management (Rc<RefCell<State>>)           │   │
 │   │   - Settings persistence (XDG dirs)                 │   │
 │   └─────────────────────────────────────────────────────┘   │
@@ -64,14 +65,18 @@ ShyQuiet/
 │   ├── main.rs              # Entry point
 │   ├── lib.rs               # Library root
 │   ├── core/
-│   │   ├── audio/           # Audio capture, VAD, encoding
+│   │   ├── audio/           # Audio capture, VAD, chunking, encoding
 │   │   ├── capture/         # Screenshot capture
 │   │   ├── api/             # AI/STT HTTP clients
-│   │   └── state/           # Shared application state
+│   │   ├── state/           # Shared application state
+│   │   ├── meeting.rs       # Meeting persistence/transcription/analysis
+│   │   └── lock.rs          # Single-instance lock + SIGUSR1 signaling
 │   └── ui/
 │       ├── mod.rs
 │       ├── stealth.rs       # Unified stealth window (GTK4 + layer-shell)
-│       └── widgets/         # Custom GTK4 widgets
+│       ├── layer_shell.rs   # Layer-shell initialization/fallback
+│       ├── header.rs        # Header/navigation
+│       └── views/           # Chat, Settings, History, Prompts, Meetings
 ├── assets/
 │   ├── icons/               # App icons
 │   └── shyquiet.desktop     # Desktop entry
@@ -95,15 +100,12 @@ ShyQuiet/
 ```toml
 [dependencies]
 # GTK4 + Adwaita (UI)
-gtk4 = "0.9"
-libadwaita = "0.7"
-gtk4-layer-shell = "0.4"
+gtk4 = "0.10"
+libadwaita = { version = "0.8", features = ["v1_5"] }
+gtk4-layer-shell = "0.7"
 
-# Async runtime
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
-
-# HTTP client (AI/STT APIs)
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client (AI/STT APIs) - blocking, used from background threads
+ureq = { version = "2.10", features = ["json"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -111,8 +113,12 @@ serde_json = "1"
 
 # Utilities
 anyhow = "1.0"
+thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+dirs = "5.0"
+chrono = { version = "0.4", features = ["serde"] }
+nix = { version = "0.29", features = ["signal"] }
 ```
 
 ### System (Fedora/Ubuntu)
@@ -148,6 +154,7 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 2. **Settings View** — API keys, model selection, theme
 3. **History View** — Past conversations
 4. **Prompts View** — System prompts editor
+5. **Meetings View** — Recordings, transcript, AI analysis
 
 ### Features
 - AI chat interface
@@ -165,7 +172,7 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 ### How It Works
 - Protocol: `zwlr-layer-shell-v1`
 - Layer: `Overlay`
-- Keyboard: `None` (HUD mode)
+- Keyboard: `OnDemand` (focus on click)
 
 ### Stealth Compatibility
 
@@ -201,7 +208,8 @@ pub struct AppState {
     pub settings: Settings,
     pub history: Vec<Conversation>,
     pub prompts: Vec<SystemPrompt>,
-    pub current_chat: Vec<Message>,
+    pub active_prompt_ids: Vec<String>,
+    pub current_messages: Vec<Message>,
 }
 
 // Access via Rc<RefCell<AppState>>
@@ -210,9 +218,12 @@ let state = Rc::new(RefCell::new(AppState::default()));
 
 ### Persistence
 - **Config:** `~/.config/shyquiet/settings.json`
-- **Data:** `~/.local/share/shyquiet/`
-  - `history.json` - Chat history
-  - `prompts.json` - System prompts
+- **Settings + chat state:** stored in `settings.json`
+- **Meetings data:** `~/.local/share/shyquiet/meetings/<meeting-id>/`
+  - `metadata.json`
+  - `transcript.txt`
+  - `analysis.md`
+  - `system.wav` / `mic.wav` (or `.opus`)
 
 ---
 
@@ -232,7 +243,6 @@ cargo build --release
 ./dev run       # Run binary
 ./dev debug     # Run with debug logging
 ./dev logs      # View logs
-./dev kill      # Stop all instances
 ```
 
 ### Lint & Format
