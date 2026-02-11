@@ -4,13 +4,19 @@
 
 | Compositor | Stealth Level | Notes |
 |------------|---------------|-------|
-| Hyprland 0.53+ | Partial | Content hidden (black rect), outline visible |
-| Sway | Minimal | Alt+Tab hiding only |
-| GNOME/X11 | None | Use window sharing |
-
-> Full invisibility is not supported by any Wayland compositor.
+| Hyprland | Full (with rule) | `no_screen_share` hides ShyQuiet in screenshot/screen-share |
+| Sway | Partial | Hidden from Alt+Tab, visible in `grim` and PipeWire capture |
+| GNOME Wayland / X11 | None | No layer-shell stealth, use window sharing |
 
 ---
+
+## Capture Behavior Matrix
+
+| Environment | `grim` / wlr-screencopy | Zoom/Meet/OBS (PipeWire) | Alt+Tab |
+|-------------|--------------------------|---------------------------|---------|
+| Hyprland + `no_screen_share` | ✅ Hidden | ✅ Hidden | ✅ Hidden |
+| Sway | ❌ Visible | ❌ Visible | ✅ Hidden |
+| GNOME Wayland / X11 | ❌ Visible | ❌ Visible | ❌ Visible |
 
 ## Hyprland Configuration
 
@@ -28,4 +34,6 @@ hyprctl layers | grep shyquiet
 
 ## Fallback: Window Sharing
 
-Share a specific window instead of entire screen — ShyQuiet won't be captured.
+If stealth is unavailable (Sway without compositor rule, GNOME, X11), share a specific app window instead of the full screen.
+
+This keeps ShyQuiet out of the shared content as long as the overlay stays on a different surface/workspace.
