@@ -11,13 +11,14 @@
 //!
 //! See docs/STEALTH_GUIDE.md for compositor configuration.
 
+use crate::core::state::Settings;
 use gtk4::ApplicationWindow;
 
 /// Initialize layer-shell for stealth mode
 ///
 /// Makes window invisible to wlr-screencopy protocol (grim, slurp).
 #[cfg(target_os = "linux")]
-pub fn init(window: &ApplicationWindow) {
+pub fn init(window: &ApplicationWindow, settings: &Settings) {
     use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
     // Early check: is this even Wayland?
@@ -63,9 +64,9 @@ pub fn init(window: &ApplicationWindow) {
     window.set_anchor(Edge::Right, false);
     window.set_anchor(Edge::Bottom, false);
 
-    // Initial position (center-ish)
-    window.set_margin(Edge::Left, 100);
-    window.set_margin(Edge::Top, 100);
+    // Restore saved position
+    window.set_margin(Edge::Left, settings.window_x);
+    window.set_margin(Edge::Top, settings.window_y);
 
     window.set_namespace(Some("shyquiet-stealth"));
 
@@ -85,6 +86,6 @@ fn apply_fallback(_window: &ApplicationWindow) {
 
 /// Stub for non-Linux platforms
 #[cfg(not(target_os = "linux"))]
-pub fn init(_window: &ApplicationWindow) {
+pub fn init(_window: &ApplicationWindow, _settings: &Settings) {
     tracing::warn!("Layer-shell not available on this platform");
 }

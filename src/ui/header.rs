@@ -6,16 +6,21 @@
 
 //! Header bar with navigation and drag handle
 
+use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::{
     ApplicationWindow, Box as GtkBox, EventControllerMotion, GestureDrag, Orientation, ToggleButton,
 };
 use libadwaita as adw;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Build header bar with navigation and drag handle
-pub fn build(window: &ApplicationWindow, stack: &adw::ViewStack) -> GtkBox {
+pub fn build(
+    window: &ApplicationWindow,
+    stack: &adw::ViewStack,
+    state: Rc<RefCell<AppState>>,
+) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 4);
     header.set_margin_top(4);
     header.set_margin_bottom(4);
@@ -53,7 +58,7 @@ pub fn build(window: &ApplicationWindow, stack: &adw::ViewStack) -> GtkBox {
     header.append(&drag_icon_r);
 
     // Setup drag gesture for window movement
-    setup_drag_gesture(&header, window);
+    setup_drag_gesture(&header, window, state);
 
     // Setup hover feedback
     setup_hover_feedback(&header);
@@ -134,20 +139,19 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
 /// Build hide button
 fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
     let hide_btn = gtk4::Button::with_label("—");
-    hide_btn.set_tooltip_text(Some("Hide (Ctrl+Alt+S or ./dev run to show)"));
+    hide_btn.set_tooltip_text(Some("Hide (Ctrl+Alt+A or ./dev toggle to show)"));
     hide_btn.add_css_class("flat");
 
     let window_c = window.clone();
     hide_btn.connect_clicked(move |_| {
-        tracing::debug!("Hide button clicked");
-        window_c.set_visible(false);
+        super::stealth::hide_window(&window_c);
     });
 
     hide_btn
 }
 
 /// Setup drag gesture for window movement (layer-shell)
-fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow) {
+fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow, state: Rc<RefCell<AppState>>) {
     let start_pos: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     let window_pos: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
 
@@ -192,10 +196,26 @@ fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow) {
         }
     });
 
-    // Drag end
+    // Drag end: save position to state
+    let window_c = window.clone();
     let start_pos_c = start_pos.clone();
     drag.connect_drag_end(move |_, _, _| {
         start_pos_c.set(None);
+
+        #[cfg(target_os = "linux")]
+        {
+            use gtk4_layer_shell::{Edge, LayerShell};
+            if window_c.is_layer_window() {
+                let x = window_c.margin(Edge::Left);
+                let y = window_c.margin(Edge::Top);
+                let mut st = state.borrow_mut();
+                st.settings.window_x = x;
+                st.settings.window_y = y;
+                if let Err(e) = st.save() {
+                    tracing::warn!("Failed to save window position: {}", e);
+                }
+            }
+        }
     });
 
     header.add_controller(drag);

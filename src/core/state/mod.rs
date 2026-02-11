@@ -24,10 +24,30 @@ pub struct Settings {
     /// Whether to also record microphone during meetings
     #[serde(default)]
     pub meeting_record_mic: bool,
+    #[serde(default = "default_window_x")]
+    pub window_x: i32,
+    #[serde(default = "default_window_y")]
+    pub window_y: i32,
+    #[serde(default = "default_window_width")]
+    pub window_width: i32,
+    #[serde(default = "default_window_height")]
+    pub window_height: i32,
 }
 
 fn default_opacity() -> f64 {
     1.0
+}
+fn default_window_x() -> i32 {
+    100
+}
+fn default_window_y() -> i32 {
+    100
+}
+fn default_window_width() -> i32 {
+    400
+}
+fn default_window_height() -> i32 {
+    550
 }
 
 impl Default for Settings {
@@ -40,6 +60,10 @@ impl Default for Settings {
             dark_mode: true,
             window_opacity: 1.0,
             meeting_record_mic: false,
+            window_x: default_window_x(),
+            window_y: default_window_y(),
+            window_width: default_window_width(),
+            window_height: default_window_height(),
         }
     }
 }
