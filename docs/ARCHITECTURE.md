@@ -78,15 +78,17 @@ ShyQuiet/
 │       ├── header.rs        # Header/navigation
 │       └── views/           # Chat, Settings, History, Prompts, Meetings
 ├── assets/
-│   ├── icons/               # App icons
 │   └── shyquiet.desktop     # Desktop entry
 ├── docker/
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── docker-build.sh
+├── dev                         # Entry point: ./dev <command>
 ├── scripts/
-│   ├── run, debug, logs, kill
-│   ├── docker, lint, fmt
+│   ├── run, debug, logs        # Runtime scripts
+│   ├── docker, lint, fmt       # Build/quality scripts
+│   ├── build-layer-shell       # GTK4 layer-shell from source
+│   ├── test-stealth            # Stealth mode verification
 │   └── README.md
 └── docs/
     └── *.md
@@ -113,7 +115,6 @@ serde_json = "1"
 
 # Utilities
 anyhow = "1.0"
-thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 dirs = "5.0"

@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/AshBuk/ShyQuiet"
 homepage = "https://github.com/AshBuk/ShyQuiet"
 edition = "2021"
-keywords = ["rust", "ai", "assistent", "privacy", "wayland", "gtk4", "stealth"]
+keywords = ["linux", "rust", "ai", "assistant", "privacy", "wayland", "gtk4"]
 categories = ["gui", "accessibility"]
 
 [lib]
