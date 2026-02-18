@@ -1,9 +1,9 @@
-# ShyQuiet Scripts
+# Shaya Scripts
 
 Usage: `./dev <command>`
 
 ```
-run      # Run ShyQuiet binary
+run      # Run Shaya binary
 debug    # Run with debug logging (background)
 logs     # View logs in real-time
 kill     # Stop running instances
@@ -19,7 +19,7 @@ Run `./dev docker` for interactive menu:
 ```
 1) Build Docker image
 2) Start container (shell)
-3) Build ShyQuiet (cargo build --release)
+3) Build Shaya (cargo build --release)
 4) Check compilation (cargo check)
 5) Lint (cargo clippy)
 6) Fmt (cargo fmt)

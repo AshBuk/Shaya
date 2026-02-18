@@ -1,21 +1,21 @@
 [package]
-name = "shyquiet"
+name = "shaya"
 version = "0.1.0"
 description = "Privacy-first AI assistant with stealth mode - invisible on screen sharing."
 authors = ["Asher Buk"]
 license = "Apache-2.0"
-repository = "https://github.com/AshBuk/ShyQuiet"
-homepage = "https://github.com/AshBuk/ShyQuiet"
+repository = "https://github.com/AshBuk/Shaya"
+homepage = "https://github.com/AshBuk/Shaya"
 edition = "2021"
 keywords = ["linux", "rust", "ai", "assistant", "privacy", "wayland", "gtk4"]
 categories = ["gui", "accessibility"]
 
 [lib]
-name = "shyquiet_lib"
+name = "shaya_lib"
 crate-type = ["rlib"]
 
 [[bin]]
-name = "shyquiet"
+name = "shaya"
 path = "src/main.rs"
 
 [dependencies]

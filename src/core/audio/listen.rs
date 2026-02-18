@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Listen recorder - captures system audio (monitor source)
 //!
@@ -25,7 +25,7 @@ pub struct ListenRecorder {
 impl ListenRecorder {
     /// Create a new listen recorder (default temp path)
     pub fn new() -> Self {
-        Self::with_path(std::env::temp_dir().join("shyquiet_listen.wav"))
+        Self::with_path(std::env::temp_dir().join("shaya_listen.wav"))
     }
 
     /// Create a new listen recorder with custom output path

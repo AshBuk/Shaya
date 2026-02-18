@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Stealth Window - GTK4 + Layer-Shell
 //!
-//! Single-instance window with layer-shell namespace "shyquiet-stealth".
+//! Single-instance window with layer-shell namespace "shaya-stealth".
 //! Configure compositor rules to control screen share visibility.
 //!
 //! See docs/STEALTH_GUIDE.md for setup.
@@ -22,7 +22,7 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const APP_ID: &str = "com.shyquiet.stealth";
+const APP_ID: &str = "com.shaya.stealth";
 
 // Global references for SIGUSR1 handler
 thread_local! {
@@ -84,7 +84,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     };
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("ShyQuiet")
+        .title("Shaya")
         .default_width(window_width)
         .default_height(window_height)
         .build();

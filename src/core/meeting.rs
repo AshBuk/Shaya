@@ -2,12 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Meeting data model and directory-based persistence
 //!
 //! Each meeting is stored in its own directory under
-//! `~/.local/share/shyquiet/meetings/meeting-{timestamp}/`
+//! `~/.local/share/shaya/meetings/meeting-{timestamp}/`
 
 use crate::core::api::WhisperClient;
 use crate::core::audio::chunking;
@@ -83,7 +83,7 @@ impl MeetingManager {
     pub fn base_dir() -> PathBuf {
         dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("shyquiet")
+            .join("shaya")
             .join("meetings")
     }
 

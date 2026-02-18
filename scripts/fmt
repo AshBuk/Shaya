@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
 # Format Rust code (inside Docker)
 
@@ -27,7 +27,7 @@ $DC up -d
 echo "=== Formatting Rust ==="
 echo ""
 
-$DC exec shyquiet bash -c '
+$DC exec shaya bash -c '
     cd /app
     cargo fmt --all
     echo "✓ Rust formatted!"

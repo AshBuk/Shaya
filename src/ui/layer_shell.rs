@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Layer-shell initialization for stealth mode.
 //!
-//! Uses wlr-layer-shell protocol with namespace "shyquiet-stealth".
+//! Uses wlr-layer-shell protocol with namespace "shaya-stealth".
 //! Compositor rules can target this namespace for stealth behavior.
 //!
 //! See docs/STEALTH_GUIDE.md for compositor configuration.
@@ -68,7 +68,7 @@ pub fn init(window: &ApplicationWindow, settings: &Settings) {
     window.set_margin(Edge::Left, settings.window_x);
     window.set_margin(Edge::Top, settings.window_y);
 
-    window.set_namespace(Some("shyquiet-stealth"));
+    window.set_namespace(Some("shaya-stealth"));
 
     tracing::info!("Stealth mode enabled (layer-shell: Overlay, keyboard=OnDemand)");
 }

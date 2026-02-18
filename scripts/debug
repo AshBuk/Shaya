@@ -3,15 +3,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# ShyQuiet - Run in background with debug logging
+# Shaya - Run in background with debug logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_FILE="/tmp/shyquiet.log"
+LOG_FILE="/tmp/shaya.log"
 
-RUST_LOG=debug "$PROJECT_ROOT/target/release/shyquiet" > "$LOG_FILE" 2>&1 &
+RUST_LOG=debug "$PROJECT_ROOT/target/release/shaya" > "$LOG_FILE" 2>&1 &
 PID=$!
 
-echo "ShyQuiet started in background (PID: $PID)"
+echo "Shaya started in background (PID: $PID)"
 echo "View logs: ./dev logs"

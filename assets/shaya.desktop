@@ -2,23 +2,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=ShyQuiet
+Name=Shaya
 GenericName=AI Assistant
 Comment=Privacy-first AI assistant with stealth mode - invisible during screen sharing
-Exec=shyquiet
-Icon=shyquiet
+Exec=shaya
+Icon=shaya
 Terminal=false
 Categories=Utility;Office;
 Keywords=ai;assistant;stealth;privacy;meeting;interview;invisible;
 
 # STEALTH: Disable all notifications to stay invisible
 StartupNotify=false
-StartupWMClass=com.shyquiet.stealth
+StartupWMClass=com.shaya.stealth
 
 # STEALTH: No notification integration (visible in screen share)
 X-GNOME-UsesNotifications=false

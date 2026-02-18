@@ -4,7 +4,7 @@
 
 | Compositor | Stealth Level | Notes |
 |------------|---------------|-------|
-| Hyprland | Full (with rule) | `no_screen_share` hides ShyQuiet from screenshots and screen share |
+| Hyprland | Full (with rule) | `no_screen_share` hides Shaya from screenshots and screen share |
 | Sway | Partial | Hidden from Alt+Tab; visible in `grim` and PipeWire capture |
 | KDE Plasma | Partial | Layer-shell overlay works; no compositor-level capture hiding |
 | GNOME Wayland | None | No layer-shell; share a specific window as workaround |
@@ -45,13 +45,13 @@
 ## Hyprland Configuration
 
 ```ini
-layerrule = no_screen_share on, match:namespace shyquiet-stealth
+layerrule = no_screen_share on, match:namespace shaya-stealth
 ```
 
 ### Verify
 
 ```bash
-hyprctl layers | grep shyquiet
+hyprctl layers | grep shaya
 ```
 
 ---
@@ -60,6 +60,6 @@ hyprctl layers | grep shyquiet
 
 If stealth is unavailable (Sway, KDE, GNOME, X11), share a **specific app window** in Zoom/Meet/OBS instead of the full screen.
 
-This keeps ShyQuiet out of the shared content as long as the overlay stays on a different surface/workspace.
+This keeps Shaya out of the shared content as long as the overlay stays on a different surface/workspace.
 
 "The quieter you become, the more you are able to hear" (c) 

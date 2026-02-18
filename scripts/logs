@@ -3,10 +3,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# ShyQuiet - View logs in real-time
-LOG_FILE="/tmp/shyquiet.log"
+# Shaya - View logs in real-time
+LOG_FILE="/tmp/shaya.log"
 
 if [ ! -f "$LOG_FILE" ]; then
     echo "Log file not found: $LOG_FILE"

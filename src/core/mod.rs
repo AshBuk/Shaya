@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Core business logic (UI-independent)
 

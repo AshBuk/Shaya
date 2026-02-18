@@ -2,14 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
 services:
-  shyquiet:
+  shaya:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: shyquiet
+    container_name: shaya
     volumes:
       - ..:/app
       - cargo_cache:/root/.cargo/registry

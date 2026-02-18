@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Audio capture using system tools (pw-record/parecord)
 
@@ -22,7 +22,7 @@ pub struct AudioRecorder {
 impl AudioRecorder {
     /// Create a new audio recorder (default temp path)
     pub fn new() -> Self {
-        Self::with_path(std::env::temp_dir().join("shyquiet_recording.wav"))
+        Self::with_path(std::env::temp_dir().join("shaya_recording.wav"))
     }
 
     /// Create a new audio recorder with custom output path

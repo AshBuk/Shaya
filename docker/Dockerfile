@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# ShyQuiet Build Environment
+# Shaya Build Environment
 # Pure Rust + GTK4 + libadwaita
 
 FROM ubuntu:24.04

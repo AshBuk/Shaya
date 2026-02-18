@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# Clippy configuration for ShyQuiet
+# Clippy configuration for Shaya
 # Focused on production quality, performance, and clean code
 
 # Cognitive complexity threshold (default: 25)

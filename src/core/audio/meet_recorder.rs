@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Meeting recorder — orchestrates dual audio recording (system + optional mic)
 //! and post-recording WAV-to-OPUS conversion.

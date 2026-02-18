@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Messaging handlers - chat messages and screenshots
 
@@ -213,7 +213,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
 
     if state.current_messages.is_empty() {
         buffer.set_text(
-            "Welcome to ShyQuiet 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
+            "Welcome to Shaya 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
         );
         return;
     }

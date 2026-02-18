@@ -11,7 +11,7 @@ err() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 ok() { echo -e "${GREEN}✓ $1${NC}"; }
 warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
 
-echo "=== ShyQuiet Stealth Test ==="
+echo "=== Shaya Stealth Test ==="
 echo
 
 # Check Wayland
@@ -19,25 +19,25 @@ echo
 ok "Wayland"
 
 # Check layer namespace
-if hyprctl layers 2>/dev/null | grep -q "shyquiet-stealth"; then
+if hyprctl layers 2>/dev/null | grep -q "shaya-stealth"; then
     ok "Layer registered"
 else
-    warn "Layer not found (ShyQuiet not running?)"
+    warn "Layer not found (Shaya not running?)"
 fi
 
 # Check layerrule in config
-if grep -qE "no_screen_share.*shyquiet-stealth" ~/.config/hypr/hyprland.conf 2>/dev/null; then
+if grep -qE "no_screen_share.*shaya-stealth" ~/.config/hypr/hyprland.conf 2>/dev/null; then
     ok "Layerrule configured"
 else
     warn "Add to hyprland.conf:"
-    echo "  layerrule = no_screen_share on, match:namespace shyquiet-stealth"
+    echo "  layerrule = no_screen_share on, match:namespace shaya-stealth"
 fi
 
 # Screenshot test
-if command -v grim &>/dev/null && pgrep -f shyquiet >/dev/null; then
+if command -v grim &>/dev/null && pgrep -f shaya >/dev/null; then
     grim /tmp/stealth-test.png 2>/dev/null
     ok "Screenshot: /tmp/stealth-test.png"
     echo
-    echo "Verify: ShyQuiet should appear as BLACK RECTANGLE (not invisible)"
+    echo "Verify: Shaya should appear as BLACK RECTANGLE (not invisible)"
     echo "  xdg-open /tmp/stealth-test.png"
 fi

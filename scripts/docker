@@ -3,9 +3,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# ShyQuiet - Docker build helper
+# Shaya - Docker build helper
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 "$PROJECT_ROOT/docker/docker-build.sh" "$@"

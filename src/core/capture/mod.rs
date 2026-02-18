@@ -2,13 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Screenshot capture for Wayland/X11
 //!
 //! Stealth behavior:
-//! - Hyprland: ShyQuiet invisible with `layerrule = noscreenshare` (see STEALTH_GUIDE.md)
-//! - Sway: ShyQuiet WILL appear in screenshots (no layer filtering support)
+//! - Hyprland: Shaya invisible with `layerrule = noscreenshare` (see STEALTH_GUIDE.md)
+//! - Sway: Shaya WILL appear in screenshots (no layer filtering support)
 //! - Selection UI (slurp overlay) is always invisible during screen share
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -42,7 +42,7 @@ pub fn capture_area() -> Result<Screenshot, String> {
         );
     }
 
-    let output_path = std::env::temp_dir().join("shyquiet_area.png");
+    let output_path = std::env::temp_dir().join("shaya_area.png");
     let _ = fs::remove_file(&output_path);
 
     tracing::info!("Starting area selection");
@@ -64,7 +64,7 @@ pub fn capture_area() -> Result<Screenshot, String> {
 
 /// Take a screenshot of the entire screen
 pub fn take_screenshot() -> Result<Screenshot, String> {
-    let output_path = std::env::temp_dir().join("shyquiet_screenshot.png");
+    let output_path = std::env::temp_dir().join("shaya_screenshot.png");
     let _ = fs::remove_file(&output_path);
 
     tracing::info!("Taking full screenshot");
@@ -90,7 +90,7 @@ pub async fn take_screenshot_async() -> Result<Option<Screenshot>, String> {
         return take_screenshot().map(Some);
     }
 
-    let output_path = std::env::temp_dir().join("shyquiet_screenshot.png");
+    let output_path = std::env::temp_dir().join("shaya_screenshot.png");
     let _ = fs::remove_file(&output_path);
 
     tracing::info!("Taking GNOME Wayland screenshot via XDG portal");
@@ -265,7 +265,7 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let token = format!("shyquiet_{}_{}", std::process::id(), nanos);
+    let token = format!("shaya_{}_{}", std::process::id(), nanos);
     opts.insert("handle_token".to_string(), token.to_variant());
     opts.insert("interactive".to_string(), true.to_variant());
 

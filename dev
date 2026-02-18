@@ -3,18 +3,18 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# https://github.com/AshBuk/ShyQuiet
+# https://github.com/AshBuk/Shaya
 
-# ShyQuiet CLI - Development helper
+# Shaya CLI - Development helper
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 
 if [ $# -eq 0 ]; then
-    echo "ShyQuiet Development CLI"
+    echo "Shaya Development CLI"
     echo ""
     echo "  ./dev docker   # Docker build helper (interactive menu)"
-    echo "  ./dev run      # Run ShyQuiet binary"
+    echo "  ./dev run      # Run Shaya binary"
     echo "  ./dev debug    # Run with debug logging"
     echo "  ./dev logs     # View logs"
     echo "  ./dev lint     # cargo clippy"

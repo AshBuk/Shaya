@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Process lock file for single-instance without D-Bus
 //!
@@ -19,7 +19,7 @@ use std::path::PathBuf;
 pub fn path() -> PathBuf {
     dirs::runtime_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("shyquiet.lock")
+        .join("shaya.lock")
 }
 
 /// Acquire lock file
@@ -43,7 +43,7 @@ pub fn acquire() -> anyhow::Result<bool> {
                         use nix::sys::signal::{kill, Signal};
                         use nix::unistd::Pid;
                         tracing::info!(
-                            "ShyQuiet already running (PID: {}), sending show signal",
+                            "Shaya already running (PID: {}), sending show signal",
                             pid
                         );
                         if kill(Pid::from_raw(pid), Signal::SIGUSR1).is_ok() {

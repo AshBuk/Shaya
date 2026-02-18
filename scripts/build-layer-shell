@@ -126,7 +126,7 @@ do_install() {
     if [ "$NEW_VERSION" = "$VERSION" ]; then
         echo -e "${GREEN}✓ gtk4-layer-shell ${VERSION} installed successfully!${NC}"
         echo
-        echo -e "${YELLOW}To test ShyQuiet stealth mode:${NC}"
+        echo -e "${YELLOW}To test Shaya stealth mode:${NC}"
         echo -e "  ./dev run"
         echo
         echo -e "${YELLOW}To uninstall later (when Fedora updates):${NC}"

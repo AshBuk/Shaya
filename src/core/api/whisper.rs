@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// https://github.com/AshBuk/ShyQuiet
+// https://github.com/AshBuk/Shaya
 
 //! Whisper STT API client (Groq)
 
@@ -54,7 +54,7 @@ impl WhisperClient {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let boundary = format!("----ShyQuietBoundary{}{}", std::process::id(), nonce);
+        let boundary = format!("----ShayaBoundary{}{}", std::process::id(), nonce);
         let mut body = Vec::new();
 
         // Add file field

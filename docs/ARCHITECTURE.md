@@ -1,8 +1,8 @@
-# ShyQuiet Architecture
+# Shaya Architecture
 
 ## Overview
 
-ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to `wlr-screencopy` based tools on Wayland (Sway, Hyprland). See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for PipeWire/Zoom limitations.
+Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wlr-screencopy` based tools on Wayland (Sway, Hyprland). See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for PipeWire/Zoom limitations.
 
 ## Core Principle
 
@@ -17,7 +17,7 @@ ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    SHYQUIET BINARY                          │
+│                    SHAYA BINARY                          │
 │                   (Pure Rust + GTK4)                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
@@ -56,7 +56,7 @@ ShyQuiet is a privacy-first AI assistant with **stealth mode** — invisible to 
 ## Project Structure
 
 ```
-ShyQuiet/
+Shaya/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── rustfmt.toml
@@ -78,7 +78,7 @@ ShyQuiet/
 │       ├── header.rs        # Header/navigation
 │       └── views/           # Chat, Settings, History, Prompts, Meetings
 ├── assets/
-│   └── shyquiet.desktop     # Desktop entry
+│   └── shaya.desktop     # Desktop entry
 ├── docker/
 │   ├── Dockerfile
 │   ├── docker-compose.yml
@@ -142,7 +142,7 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 ### UI Structure
 ```
 ┌────────────────────────────────────┐
-│  🤫 ShyQuiet    [Chat][⚙️][📜][📝] │  ← Tab switcher
+│  🤫 Shaya    [Chat][⚙️][📜][📝] │  ← Tab switcher
 ├────────────────────────────────────┤
 │                                    │
 │         Active View Content        │  ← ViewStack
@@ -218,9 +218,9 @@ let state = Rc::new(RefCell::new(AppState::default()));
 ```
 
 ### Persistence
-- **Config:** `~/.config/shyquiet/settings.json`
+- **Config:** `~/.config/shaya/settings.json`
 - **Settings + chat state:** stored in `settings.json`
-- **Meetings data:** `~/.local/share/shyquiet/meetings/<meeting-id>/`
+- **Meetings data:** `~/.local/share/shaya/meetings/<meeting-id>/`
   - `metadata.json`
   - `transcript.txt`
   - `analysis.md`
@@ -233,7 +233,7 @@ let state = Rc::new(RefCell::new(AppState::default()));
 ### Build
 ```bash
 # Docker (recommended)
-./dev docker    # Select: Build ShyQuiet
+./dev docker    # Select: Build Shaya
 
 # Local (requires system deps)
 cargo build --release
