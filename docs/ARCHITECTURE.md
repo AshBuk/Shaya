@@ -7,7 +7,7 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 ## Core Principle
 
 **One Rust binary, one unified stealth window:**
-- **Unified Stealth Window** — GTK4 + layer-shell + libadwaita (ALL functionality in one invisible window)
+- **Unified Window** — GTK4 + layer-shell + libadwaita (ALL functionality in one invisible window)
 
 **No web technologies. Pure native GTK4.**
 
@@ -22,7 +22,7 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │   ┌─────────────────────────────────────────────────────┐   │
-│   │         UNIFIED STEALTH WINDOW                      │   │
+│   │            UNIFIED WINDOW                            │   │
 │   │       GTK4 + gtk4-layer-shell + libadwaita          │   │
 │   │                                                     │   │
 │   │   ┌─────────────────────────────────────────────┐   │   │
@@ -42,7 +42,7 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 │   │              RUST CORE                              │   │
 │   │                                                     │   │
 │   │   - Audio capture (PipeWire/PulseAudio)             │   │
-│   │   - Screenshot capture (grim/gnome-screenshot/etc)  │   │
+│   │   - Screenshot capture (grim/spectacle/XDG Portal)  │   │
 │   │   - AI/STT API calls (ureq, blocking)               │   │
 │   │   - State management (Rc<RefCell<State>>)           │   │
 │   │   - Settings persistence (XDG dirs)                 │   │
@@ -65,18 +65,24 @@ Shaya/
 │   ├── main.rs              # Entry point
 │   ├── lib.rs               # Library root
 │   ├── core/
-│   │   ├── audio/           # Audio capture, VAD, chunking, encoding
-│   │   ├── capture/         # Screenshot capture
-│   │   ├── api/             # AI/STT HTTP clients
-│   │   ├── state/           # Shared application state
-│   │   ├── meeting.rs       # Meeting persistence/transcription/analysis
-│   │   └── lock.rs          # Single-instance lock + SIGUSR1 signaling
+│   │   ├── api/             # Groq LLM + Whisper STT clients
+│   │   ├── audio/           # Capture, VAD, chunking, encoding
+│   │   ├── capture/         # Screenshot capture (multi-DE)
+│   │   ├── state/           # AppState, Settings, persistence
+│   │   ├── meeting.rs       # Meeting lifecycle, transcription, analysis
+│   │   ├── models.rs        # AI/STT model constants
+│   │   ├── lock.rs          # Single-instance lock + SIGUSR1 signaling
+│   │   └── utils.rs         # Shared utilities
 │   └── ui/
-│       ├── mod.rs
-│       ├── stealth.rs       # Unified stealth window (GTK4 + layer-shell)
-│       ├── layer_shell.rs   # Layer-shell initialization/fallback
-│       ├── header.rs        # Header/navigation
-│       └── views/           # Chat, Settings, History, Prompts, Meetings
+│       ├── stealth.rs       # Main window (GTK4 + layer-shell)
+│       ├── layer_shell.rs   # Layer-shell init / fallback
+│       ├── header.rs        # Header bar with navigation
+│       └── views/
+│           ├── chat/        # Chat UI, messaging, audio, markdown
+│           ├── settings.rs  # API keys, model selection, theme
+│           ├── history.rs   # Past conversations
+│           ├── prompts.rs   # System prompts editor
+│           └── meetings.rs  # Meeting recording and transcription
 ├── assets/
 │   └── shaya.desktop     # Desktop entry
 ├── docker/
@@ -96,44 +102,6 @@ Shaya/
 
 ---
 
-## Dependencies
-
-### Cargo.toml
-```toml
-[dependencies]
-# GTK4 + Adwaita (UI)
-gtk4 = "0.10"
-libadwaita = { version = "0.8", features = ["v1_5"] }
-gtk4-layer-shell = "0.7"
-
-# HTTP client (AI/STT APIs) - blocking, used from background threads
-ureq = { version = "2.10", features = ["json"] }
-
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Utilities
-anyhow = "1.0"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-dirs = "5.0"
-chrono = { version = "0.4", features = ["serde"] }
-nix = { version = "0.29", features = ["signal"] }
-```
-
-### System (Fedora/Ubuntu)
-```bash
-# Fedora
-sudo dnf install gtk4-devel libadwaita-devel gtk4-layer-shell-devel
-
-# Ubuntu (needs PPA or build from source)
-sudo apt install libgtk-4-dev libadwaita-1-dev
-# gtk4-layer-shell: build from source
-```
-
----
-
 ## Unified Stealth Window
 
 ### Purpose
@@ -141,63 +109,21 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 
 ### UI Structure
 ```
-┌────────────────────────────────────┐
-│  🤫 Shaya    [Chat][⚙️][📜][📝] │  ← Tab switcher
-├────────────────────────────────────┤
-│                                    │
-│         Active View Content        │  ← ViewStack
-│                                    │
-└────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│  🤫 Shaya  [Chat][⚙️][📜][📝][⏺]       │  ← Tab switcher
+├──────────────────────────────────────────┤
+│                                          │
+│           Active View Content            │  ← ViewStack
+│                                          │
+└──────────────────────────────────────────┘
 ```
 
 ### Views
-1. **Chat View** — AI interaction, transcription display
-2. **Settings View** — API keys, model selection, theme
-3. **History View** — Past conversations
-4. **Prompts View** — System prompts editor
-5. **Meetings View** — Recordings, transcript, AI analysis
-
-### Features
-- AI chat interface
-- Voice transcription display
-- Audio capture control
-- Screenshot with auto-attach
-- Settings management
-- Chat history
-- System prompts editor
-
----
-
-## Stealth Mode
-
-### How It Works
-- Protocol: `zwlr-layer-shell-v1`
-- Layer: `Overlay`
-- Keyboard: `OnDemand` (focus on click)
-
-### Stealth Compatibility
-
-| Capture Method | Stealth | Notes |
-|----------------|---------|-------|
-| `grim` (wlr-screencopy) | ✅ Hidden | Protocol excludes Overlay |
-| `swaymsg -t get_tree` | ✅ Hidden | Layer surfaces not in tree |
-| Zoom/Meet/Teams (PipeWire) | ❌ Visible | PipeWire gets full framebuffer |
-| OBS PipeWire capture | ❌ Visible | Same limitation |
-
-### Solutions for Full Screen Share
-
-1. **Share specific window** — Select browser/IDE window instead of entire screen
-2. **Virtual monitor** — Use `wl-mirror` to create clean output without overlay
-
-See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for virtual monitor setup.
-
-### Platform Support
-
-| Platform | Stealth |
-|----------|---------|
-| Wayland + wlr-layer-shell (Sway, Hyprland) | ✅ Partial (see table above) |
-| GNOME Wayland | ❌ No layer-shell support |
-| X11 | ❌ No stealth possible |
+1. **Chat** — AI interaction, voice input, screenshots
+2. **Settings** — API keys, model selection, theme, opacity
+3. **History** — Past conversations (browse, continue, delete)
+4. **Prompts** — System prompts editor (multiple active)
+5. **Meetings** — Record, transcribe, AI analysis
 
 ---
 
@@ -225,32 +151,3 @@ let state = Rc::new(RefCell::new(AppState::default()));
   - `transcript.txt`
   - `analysis.md`
   - `system.wav` / `mic.wav` (or `.opus`)
-
----
-
-## Development
-
-### Build
-```bash
-# Docker (recommended)
-./dev docker    # Select: Build Shaya
-
-# Local (requires system deps)
-cargo build --release
-```
-
-### Run
-```bash
-./dev run       # Run binary
-./dev debug     # Run with debug logging
-./dev logs      # View logs
-```
-
-### Lint & Format
-```bash
-./dev lint      # cargo clippy
-./dev fmt       # cargo fmt
-```
-
----
-

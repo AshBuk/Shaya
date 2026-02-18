@@ -42,10 +42,7 @@ pub fn acquire() -> anyhow::Result<bool> {
                     {
                         use nix::sys::signal::{kill, Signal};
                         use nix::unistd::Pid;
-                        tracing::info!(
-                            "Shaya already running (PID: {}), sending show signal",
-                            pid
-                        );
+                        tracing::info!("Shaya already running (PID: {}), sending show signal", pid);
                         if kill(Pid::from_raw(pid), Signal::SIGUSR1).is_ok() {
                             tracing::info!("Signal sent - window should appear");
                         }
