@@ -256,14 +256,13 @@ pub fn build_input(
             // Generate unique ID and timestamp
             let now = Utc::now();
             let id = now.timestamp_millis().to_string();
-            let created_at = now.format("%Y-%m-%d %H:%M").to_string();
 
             // Create conversation and save
             let conv = Conversation {
                 id,
                 title,
                 messages: state_mut.current_messages.clone(),
-                created_at,
+                created_at: now,
             };
 
             state_mut.history.push(conv);

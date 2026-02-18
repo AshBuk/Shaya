@@ -7,6 +7,7 @@
 //! Application state with persistence
 
 use crate::core::models::{DEFAULT_MODEL, DEFAULT_STT_MODEL};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -90,7 +91,7 @@ pub struct Conversation {
     pub id: String,
     pub title: String,
     pub messages: Vec<Message>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 /// System prompt

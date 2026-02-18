@@ -85,7 +85,7 @@ fn rebuild_content(
             row.set_title(&conv.title);
             row.set_subtitle(&format!(
                 "{} • {} messages",
-                conv.created_at,
+                conv.created_at.format("%Y-%m-%d %H:%M"),
                 conv.messages.len()
             ));
 
