@@ -30,30 +30,49 @@ pub struct ChatContext {
     pub attach_label: Label,
 }
 
+fn apply_captured_image(
+    image: &Rc<RefCell<Option<ImageData>>>,
+    attach_label: &Label,
+    status_label: &Label,
+    screenshot: capture::Screenshot,
+    log_prefix: &str,
+) {
+    let size_kb = screenshot.base64_data.len() / 1024;
+    tracing::info!("{}: {}KB", log_prefix, size_kb);
+
+    *image.borrow_mut() = Some(ImageData {
+        base64_data: screenshot.base64_data,
+        mime_type: screenshot.mime_type,
+    });
+
+    attach_label.set_text(&format!("📎 Screenshot attached ({}KB)", size_kb));
+    attach_label.set_visible(true);
+    status_label.set_visible(false);
+}
+
 /// Handle area selection button click (slurp + grim)
 pub fn handle_area_capture_click(
     image: &Rc<RefCell<Option<ImageData>>>,
     status_label: &Label,
     attach_label: &Label,
 ) {
+    if capture::requires_async_portal() {
+        handle_screenshot_click(image, status_label, attach_label);
+        return;
+    }
+
     status_label.set_text("🖱️ Select area...");
     status_label.set_visible(true);
 
     // Capture selected area (stealth-safe: slurp uses layer-shell Overlay)
     match capture::capture_area() {
-        Ok(screenshot) => {
-            let size_kb = screenshot.base64_data.len() / 1024;
-            tracing::info!("Area screenshot attached: {}KB", size_kb);
-
-            *image.borrow_mut() = Some(ImageData {
-                base64_data: screenshot.base64_data,
-                mime_type: screenshot.mime_type,
-            });
-
-            attach_label.set_text(&format!("📎 Screenshot attached ({}KB)", size_kb));
-            attach_label.set_visible(true);
-            status_label.set_visible(false);
-        }
+        Ok(screenshot) => apply_captured_image(
+            image,
+            attach_label,
+            status_label,
+            screenshot,
+            "Area screenshot attached",
+        ),
         Err(e) => {
             status_label.set_text(&format!("❌ {}", e));
         }
@@ -69,21 +88,38 @@ pub fn handle_screenshot_click(
     status_label.set_text("📸 Capturing...");
     status_label.set_visible(true);
 
-    // Take screenshot (stealth window is not captured by grim/gnome-screenshot)
+    // GNOME Wayland portal flow is async and must run on the main loop.
+    if capture::requires_async_portal() {
+        let image_c = image.clone();
+        let status_c = status_label.clone();
+        let attach_c = attach_label.clone();
+        glib::spawn_future_local(async move {
+            match capture::take_screenshot_async().await {
+                Ok(Some(screenshot)) => apply_captured_image(
+                    &image_c,
+                    &attach_c,
+                    &status_c,
+                    screenshot,
+                    "Screenshot attached via portal",
+                ),
+                Ok(None) => status_c.set_visible(false),
+                Err(e) => {
+                    status_c.set_text(&format!("❌ {}", e));
+                }
+            }
+        });
+        return;
+    }
+
+    // Non-portal backends remain synchronous for now.
     match capture::take_screenshot() {
-        Ok(screenshot) => {
-            let size_kb = screenshot.base64_data.len() / 1024;
-            tracing::info!("Screenshot attached: {}KB", size_kb);
-
-            *image.borrow_mut() = Some(ImageData {
-                base64_data: screenshot.base64_data,
-                mime_type: screenshot.mime_type,
-            });
-
-            attach_label.set_text(&format!("📎 Screenshot attached ({}KB)", size_kb));
-            attach_label.set_visible(true);
-            status_label.set_visible(false);
-        }
+        Ok(screenshot) => apply_captured_image(
+            image,
+            attach_label,
+            status_label,
+            screenshot,
+            "Screenshot attached",
+        ),
         Err(e) => {
             status_label.set_text(&format!("❌ {}", e));
         }

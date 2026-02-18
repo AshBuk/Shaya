@@ -12,9 +12,16 @@
 //! - Selection UI (slurp overlay) is always invisible during screen share
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use gtk4::gio;
+use gtk4::glib;
+use gtk4::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+type PortalResponse = (u32, std::collections::HashMap<String, glib::Variant>);
+type SharedPortalResult = std::rc::Rc<std::cell::RefCell<Option<Result<PortalResponse, String>>>>;
 
 /// Screenshot result with base64 encoded image
 #[derive(Clone)]
@@ -23,20 +30,26 @@ pub struct Screenshot {
     pub mime_type: String,
 }
 
-/// Capture user-selected area
-/// Uses slurp + grim on Wayland, gnome-screenshot -a on GNOME/X11
+/// Capture user-selected area (sync path).
+/// Wayland: slurp + grim (wlroots). X11: gnome-screenshot -a.
+/// GNOME Wayland uses the async XDG portal instead — see `take_screenshot_async`.
 pub fn capture_area() -> Result<Screenshot, String> {
+    if requires_async_portal() {
+        return Err(
+            "GNOME Wayland area capture requires the async XDG Desktop Portal; \
+             use take_screenshot_async() from the UI main loop."
+                .to_string(),
+        );
+    }
+
     let output_path = std::env::temp_dir().join("shyquiet_area.png");
     let _ = fs::remove_file(&output_path);
 
     tracing::info!("Starting area selection");
 
-    if is_wayland() && !is_gnome() && has_command("slurp") && has_command("grim") {
-        // wlroots compositors only (Sway, Hyprland) — slurp and grim both require
-        // wlr-layer-shell / wlr-screencopy protocols that GNOME Wayland does not expose.
+    if is_wayland() && has_command("slurp") && has_command("grim") {
         capture_area_slurp_grim(&output_path)?;
     } else if has_command("gnome-screenshot") {
-        // GNOME or X11 fallback
         capture_area_gnome(&output_path)?;
     } else {
         return Err("No area capture tool. Install: slurp+grim or gnome-screenshot".to_string());
@@ -60,6 +73,28 @@ pub fn take_screenshot() -> Result<Screenshot, String> {
 
     result?;
     read_and_encode(&output_path)
+}
+
+/// True when GNOME Wayland portal path must be used.
+pub fn requires_async_portal() -> bool {
+    is_wayland() && is_gnome()
+}
+
+/// Async screenshot path for GNOME Wayland via XDG Desktop Portal.
+/// Returns `None` when the user cancels or denies the portal dialog.
+pub async fn take_screenshot_async() -> Result<Option<Screenshot>, String> {
+    if !requires_async_portal() {
+        return take_screenshot().map(Some);
+    }
+
+    let output_path = std::env::temp_dir().join("shyquiet_screenshot.png");
+    let _ = fs::remove_file(&output_path);
+
+    tracing::info!("Taking GNOME Wayland screenshot via XDG portal");
+    if !take_gnome_wayland_screenshot_portal(&output_path).await? {
+        return Ok(None);
+    }
+    read_and_encode(&output_path).map(Some)
 }
 
 /// Read screenshot file and encode to base64
@@ -123,11 +158,10 @@ fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Capture area using gnome-screenshot -a
+/// Capture area using gnome-screenshot -a (X11 only).
 ///
-/// On X11 / older GNOME, `-f path` is honoured directly.
-/// On GNOME Wayland (44+) the `-f` flag is silently ignored and the file is
-/// saved to ~/Pictures/Screenshots/ instead — we find it there and move it.
+/// On GNOME Wayland, the XDG Desktop Portal async path is used instead
+/// (see `take_screenshot_async`), so this function targets X11 only.
 fn capture_area_gnome(output: &Path) -> Result<(), String> {
     let status = Command::new("gnome-screenshot")
         .args(["-a", "-f", output.to_string_lossy().as_ref()])
@@ -141,44 +175,11 @@ fn capture_area_gnome(output: &Path) -> Result<(), String> {
         return Err("Area selection cancelled".to_string());
     }
 
-    // X11 / old GNOME: file written directly to output path
     if output.exists() {
-        return Ok(());
+        Ok(())
+    } else {
+        Err("gnome-screenshot succeeded but file was not created".to_string())
     }
-
-    // GNOME Wayland: find the file saved to the default screenshots directory
-    tracing::info!(
-        "gnome-screenshot ignored -f flag (GNOME Wayland); searching in Pictures/Screenshots"
-    );
-    match find_latest_gnome_screenshot() {
-        Some(path) => {
-            fs::rename(&path, output).map_err(|e| format!("Failed to move screenshot: {}", e))
-        }
-        None => Err(
-            "Area screenshot not found. Ensure ~/Pictures/Screenshots/ exists and is writable"
-                .to_string(),
-        ),
-    }
-}
-
-/// Find the most recently created PNG in ~/Pictures/Screenshots (GNOME Wayland default).
-/// Only considers files modified within the last 10 seconds to avoid picking old ones.
-fn find_latest_gnome_screenshot() -> Option<std::path::PathBuf> {
-    let dir = dirs::picture_dir()?.join("Screenshots");
-    let cutoff = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(10))?;
-
-    fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|x| x == "png").unwrap_or(false))
-        .filter(|e| {
-            e.metadata()
-                .and_then(|m| m.modified())
-                .map(|t| t > cutoff)
-                .unwrap_or(false)
-        })
-        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-        .map(|e| e.path())
 }
 
 fn is_wayland() -> bool {
@@ -197,12 +198,12 @@ fn has_command(cmd: &str) -> bool {
 }
 
 fn take_wayland_screenshot(output: &Path) -> Result<(), String> {
-    // GNOME Wayland: org.gnome.Shell.Screenshot is restricted to trusted processes
-    // (AccessDenied for third-party apps since GNOME 44). Use gnome-screenshot which
-    // invokes the portal internally — it ignores -f and saves to ~/Pictures/Screenshots/,
-    // so we find it there afterwards (same strategy as capture_area_gnome).
     if is_gnome() {
-        return take_gnome_wayland_screenshot(output);
+        return Err(
+            "GNOME Wayland screenshots require the async XDG Desktop Portal; \
+             use take_screenshot_async() from the UI main loop."
+                .to_string(),
+        );
     }
 
     // wlroots compositors (Sway, Hyprland)
@@ -222,21 +223,110 @@ fn take_wayland_screenshot(output: &Path) -> Result<(), String> {
     Err("No screenshot tool found. Install: grim (Sway/Hyprland) or spectacle (KDE)".to_string())
 }
 
-/// Full screenshot on GNOME Wayland.
-///
-/// The correct path is the XDG Desktop Portal (`org.freedesktop.portal.Screenshot`),
-/// which is available but async: the call returns a D-Bus request handle and the
-/// actual file URI arrives via a `Response` signal. Implementing this requires
-/// async GIO D-Bus, which does not fit the current sync capture architecture.
-///
-/// TODO: implement via portal using glib::spawn_future_local + GIO async D-Bus.
-fn take_gnome_wayland_screenshot(_output: &Path) -> Result<(), String> {
-    Err(
-        "Screenshots on GNOME Wayland require XDG Desktop Portal integration \
-         (not yet implemented). Use Sway or Hyprland with grim for full screenshot \
-         support, or take a screenshot manually and describe what you see."
-            .to_string(),
+/// Full screenshot on GNOME Wayland via XDG Desktop Portal.
+/// Returns `Ok(true)` on success, `Ok(false)` when user cancelled/denied.
+async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, String> {
+    let proxy = gio::DBusProxy::for_bus_future(
+        gio::BusType::Session,
+        gio::DBusProxyFlags::NONE,
+        None::<&gio::DBusInterfaceInfo>,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Screenshot",
     )
+    .await
+    .map_err(|e| format!("Portal unavailable: {}", e))?;
+
+    let mut opts: std::collections::HashMap<String, glib::Variant> =
+        std::collections::HashMap::new();
+    // Distinguish concurrent requests and avoid collisions in request object path.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let token = format!("shyquiet_{}_{}", std::process::id(), nanos);
+    opts.insert("handle_token".to_string(), token.to_variant());
+    opts.insert("interactive".to_string(), true.to_variant());
+
+    let params = ("", opts).to_variant();
+    let reply = proxy
+        .call_future("Screenshot", Some(&params), gio::DBusCallFlags::NONE, -1)
+        .await
+        .map_err(|e| format!("Portal screenshot request failed: {}", e))?;
+
+    let (handle_path,) = reply
+        .get::<(String,)>()
+        .ok_or_else(|| "Portal returned invalid request handle".to_string())?;
+
+    let connection = proxy.connection();
+
+    let (response_code, response_data) =
+        wait_portal_response(&connection, &handle_path, Duration::from_secs(30)).await?;
+
+    if response_code != 0 {
+        return match response_code {
+            1 | 2 => Ok(false),
+            _ => Err(format!("Portal screenshot failed (code {})", response_code)),
+        };
+    }
+
+    let uri = response_data
+        .get("uri")
+        .and_then(|v| v.get::<String>())
+        .ok_or_else(|| "Portal response did not include screenshot URI".to_string())?;
+
+    let source_path = gio::File::for_uri(&uri)
+        .path()
+        .ok_or_else(|| "Portal returned non-local screenshot URI".to_string())?;
+
+    fs::rename(&source_path, output)
+        .or_else(|_| {
+            fs::copy(&source_path, output).map(|_| ()).map_err(|e| {
+                std::io::Error::new(e.kind(), format!("Failed to copy screenshot: {}", e))
+            })
+        })
+        .map_err(|e| format!("Failed to move portal screenshot: {}", e))?;
+
+    let _ = fs::remove_file(source_path);
+    Ok(true)
+}
+
+async fn wait_portal_response(
+    connection: &gio::DBusConnection,
+    handle_path: &str,
+    timeout: Duration,
+) -> Result<PortalResponse, String> {
+    let result: SharedPortalResult = std::rc::Rc::new(std::cell::RefCell::new(None));
+
+    let result_c = result.clone();
+    let _subscription = connection.subscribe_to_signal(
+        Some("org.freedesktop.portal.Desktop"),
+        Some("org.freedesktop.portal.Request"),
+        Some("Response"),
+        Some(handle_path),
+        None,
+        gio::DBusSignalFlags::NONE,
+        move |signal| {
+            let params = signal.parameters;
+            let parsed = params
+                .get::<(u32, std::collections::HashMap<String, glib::Variant>)>()
+                .ok_or_else(|| "Portal response payload has unexpected format".to_string());
+            *result_c.borrow_mut() = Some(parsed);
+        },
+    );
+
+    let started = Instant::now();
+    loop {
+        if let Some(done) = result.borrow_mut().take() {
+            return done;
+        }
+
+        if started.elapsed() >= timeout {
+            return Err("Portal screenshot timed out".to_string());
+        }
+
+        glib::timeout_future(Duration::from_millis(50)).await;
+    }
 }
 
 fn take_x11_screenshot(output: &Path) -> Result<(), String> {
@@ -248,12 +338,10 @@ fn take_x11_screenshot(output: &Path) -> Result<(), String> {
     ) {
         return Ok(());
     }
-
     // scrot
     if try_capture_to_file("scrot", &[&output.to_string_lossy()], output) {
         return Ok(());
     }
-
     // spectacle
     if try_capture_to_file(
         "spectacle",
@@ -262,7 +350,6 @@ fn take_x11_screenshot(output: &Path) -> Result<(), String> {
     ) {
         return Ok(());
     }
-
     Err("No screenshot tool found. Install: gnome-screenshot, scrot, or spectacle".to_string())
 }
 
