@@ -8,7 +8,6 @@
 
 pub mod capture;
 pub mod chunking;
-pub mod encoding;
 pub mod listen;
 pub mod meet_recorder;
 pub mod vad;

@@ -42,24 +42,6 @@ impl Default for VadConfig {
     }
 }
 
-/// Apply noise gate to audio samples (for future real-time VAD)
-#[allow(dead_code)]
-pub fn apply_noise_gate(samples: &[f32], threshold: f32) -> Vec<f32> {
-    const KNEE_RATIO: f32 = 3.0;
-
-    samples
-        .iter()
-        .map(|&s| {
-            let abs = s.abs();
-            if abs < threshold {
-                s * (abs / threshold).powf(1.0 / KNEE_RATIO)
-            } else {
-                s
-            }
-        })
-        .collect()
-}
-
 /// Calculate RMS and peak for audio chunk
 pub fn calculate_audio_metrics(chunk: &[f32]) -> (f32, f32) {
     if chunk.is_empty() {

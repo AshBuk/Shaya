@@ -162,12 +162,6 @@ impl AppState {
             .join("settings.json")
     }
 
-    /// Check if API key is configured
-    #[allow(dead_code)]
-    pub fn has_api_key(&self) -> bool {
-        !self.settings.api_key.is_empty()
-    }
-
     /// Get combined active system prompts content
     pub fn active_prompt(&self) -> String {
         self.prompts
