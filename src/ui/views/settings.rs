@@ -68,11 +68,11 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     // Build display names with Vision indicator
     let model_names: Vec<String> = MODELS
         .iter()
-        .map(|(_, name, vision)| {
-            if *vision {
-                format!("👁️ {}", name)
+        .map(|m| {
+            if m.supports_vision {
+                format!("👁️ {}", m.display_name)
             } else {
-                name.to_string()
+                m.display_name.to_string()
             }
         })
         .collect();
@@ -84,7 +84,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let current_model = &state.borrow().settings.model;
     let model_index = MODELS
         .iter()
-        .position(|(id, _, _)| *id == current_model)
+        .position(|m| m.id == current_model)
         .unwrap_or(0);
     model_row.set_selected(model_index as u32);
 
@@ -92,8 +92,8 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let debounce = save_debounce.clone();
     model_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
-        if let Some((model_id, _, _)) = MODELS.get(idx) {
-            state_clone.borrow_mut().settings.model = model_id.to_string();
+        if let Some(m) = MODELS.get(idx) {
+            state_clone.borrow_mut().settings.model = m.id.to_string();
         }
         schedule_autosave(&debounce, &state_clone);
     });
@@ -124,14 +124,14 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let stt_model_row = adw::ComboRow::new();
     stt_model_row.set_title("STT Model");
 
-    let stt_names: Vec<&str> = STT_MODELS.iter().map(|(_, name)| *name).collect();
+    let stt_names: Vec<&str> = STT_MODELS.iter().map(|m| m.display_name).collect();
     let stt_models = gtk4::StringList::new(&stt_names);
     stt_model_row.set_model(Some(&stt_models));
 
     let current_stt = &state.borrow().settings.stt_model;
     let stt_index = STT_MODELS
         .iter()
-        .position(|(id, _)| *id == current_stt)
+        .position(|m| m.id == current_stt)
         .unwrap_or(0);
     stt_model_row.set_selected(stt_index as u32);
 
@@ -139,8 +139,8 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let debounce = save_debounce.clone();
     stt_model_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
-        if let Some((model_id, _)) = STT_MODELS.get(idx) {
-            state_clone.borrow_mut().settings.stt_model = model_id.to_string();
+        if let Some(m) = STT_MODELS.get(idx) {
+            state_clone.borrow_mut().settings.stt_model = m.id.to_string();
         }
         schedule_autosave(&debounce, &state_clone);
     });
