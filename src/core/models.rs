@@ -28,6 +28,15 @@ pub const MODELS: &[(&str, &str, bool)] = &[
 /// Default model
 pub const DEFAULT_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";
 
+/// Available STT models: (model_id, display_name)
+pub const STT_MODELS: &[(&str, &str)] = &[
+    ("whisper-large-v3-turbo", "Whisper Large V3 Turbo"),
+    ("whisper-large-v3", "Whisper Large V3"),
+];
+
+/// Default STT model
+pub const DEFAULT_STT_MODEL: &str = "whisper-large-v3-turbo";
+
 /// Check if model supports Vision
 pub fn supports_vision(model_id: &str) -> bool {
     MODELS

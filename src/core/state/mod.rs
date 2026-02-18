@@ -6,7 +6,7 @@
 
 //! Application state with persistence
 
-use crate::core::models::DEFAULT_MODEL;
+use crate::core::models::{DEFAULT_MODEL, DEFAULT_STT_MODEL};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -56,7 +56,7 @@ impl Default for Settings {
             api_key: String::new(),
             model: DEFAULT_MODEL.to_string(),
             stt_api_key: String::new(),
-            stt_model: "whisper-large-v3-turbo".to_string(),
+            stt_model: DEFAULT_STT_MODEL.to_string(),
             dark_mode: true,
             window_opacity: 1.0,
             meeting_record_mic: false,

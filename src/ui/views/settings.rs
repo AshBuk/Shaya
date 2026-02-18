@@ -6,7 +6,7 @@
 
 //! Settings View - API keys and configuration
 
-use crate::core::models::MODELS;
+use crate::core::models::{MODELS, STT_MODELS};
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow};
@@ -120,29 +120,28 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
 
     stt_group.add(&stt_key_row);
 
-    // STT Model
+    // STT Model (using STT_MODELS constant)
     let stt_model_row = adw::ComboRow::new();
     stt_model_row.set_title("STT Model");
-    let stt_models = gtk4::StringList::new(&["whisper-large-v3-turbo", "whisper-large-v3"]);
+
+    let stt_names: Vec<&str> = STT_MODELS.iter().map(|(_, name)| *name).collect();
+    let stt_models = gtk4::StringList::new(&stt_names);
     stt_model_row.set_model(Some(&stt_models));
 
     let current_stt = &state.borrow().settings.stt_model;
-    let stt_index = if current_stt == "whisper-large-v3" {
-        1
-    } else {
-        0
-    };
-    stt_model_row.set_selected(stt_index);
+    let stt_index = STT_MODELS
+        .iter()
+        .position(|(id, _)| *id == current_stt)
+        .unwrap_or(0);
+    stt_model_row.set_selected(stt_index as u32);
 
     let state_clone = state.clone();
     let debounce = save_debounce.clone();
     stt_model_row.connect_selected_notify(move |row| {
-        let model = if row.selected() == 1 {
-            "whisper-large-v3"
-        } else {
-            "whisper-large-v3-turbo"
-        };
-        state_clone.borrow_mut().settings.stt_model = model.to_string();
+        let idx = row.selected() as usize;
+        if let Some((model_id, _)) = STT_MODELS.get(idx) {
+            state_clone.borrow_mut().settings.stt_model = model_id.to_string();
+        }
         schedule_autosave(&debounce, &state_clone);
     });
 
