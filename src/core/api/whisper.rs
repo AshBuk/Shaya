@@ -11,6 +11,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const GROQ_WHISPER_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
@@ -48,8 +49,12 @@ impl WhisperClient {
 
         tracing::info!("Transcribing {} ({} bytes)", file_name, audio_data.len());
 
-        // Build multipart form
-        let boundary = "----ShyQuietBoundary";
+        // Build multipart form (boundary must be unique per RFC 2046)
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let boundary = format!("----ShyQuietBoundary{}{}", std::process::id(), nonce);
         let mut body = Vec::new();
 
         // Add file field
