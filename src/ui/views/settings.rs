@@ -9,16 +9,37 @@
 use crate::core::models::MODELS;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::{ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow};
+use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow};
 use libadwaita as adw;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// Schedule a debounced save: cancels any pending timer and arms a new 500ms one.
+fn schedule_autosave(debounce: &Rc<Cell<Option<glib::SourceId>>>, state: &Rc<RefCell<AppState>>) {
+    if let Some(id) = debounce.take() {
+        id.remove();
+    }
+    let state_save = state.clone();
+    let debounce_reset = debounce.clone();
+    let source_id = glib::timeout_add_local_once(Duration::from_millis(500), move || {
+        debounce_reset.set(None);
+        if let Err(e) = state_save.borrow().save() {
+            tracing::error!("Failed to auto-save settings: {}", e);
+        }
+    });
+    debounce.set(Some(source_id));
+}
 
 /// Build the settings view
 pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
     let vbox = GtkBox::new(gtk4::Orientation::Vertical, 0);
 
     let page = adw::PreferencesPage::new();
+
+    // Shared debounce timer — all setting changes funnel through this one timer,
+    // so a burst of edits (e.g. typing an API key) produces only one disk write.
+    let save_debounce: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
 
     // AI Provider group
     let ai_group = adw::PreferencesGroup::new();
@@ -31,8 +52,10 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     api_key_row.set_text(&state.borrow().settings.api_key);
 
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     api_key_row.connect_changed(move |row| {
         state_clone.borrow_mut().settings.api_key = row.text().to_string();
+        schedule_autosave(&debounce, &state_clone);
     });
 
     ai_group.add(&api_key_row);
@@ -66,11 +89,13 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     model_row.set_selected(model_index as u32);
 
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     model_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
         if let Some((model_id, _, _)) = MODELS.get(idx) {
             state_clone.borrow_mut().settings.model = model_id.to_string();
         }
+        schedule_autosave(&debounce, &state_clone);
     });
 
     ai_group.add(&model_row);
@@ -87,8 +112,10 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     stt_key_row.set_text(&state.borrow().settings.stt_api_key);
 
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     stt_key_row.connect_changed(move |row| {
         state_clone.borrow_mut().settings.stt_api_key = row.text().to_string();
+        schedule_autosave(&debounce, &state_clone);
     });
 
     stt_group.add(&stt_key_row);
@@ -108,6 +135,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     stt_model_row.set_selected(stt_index);
 
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     stt_model_row.connect_selected_notify(move |row| {
         let model = if row.selected() == 1 {
             "whisper-large-v3"
@@ -115,6 +143,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
             "whisper-large-v3-turbo"
         };
         state_clone.borrow_mut().settings.stt_model = model.to_string();
+        schedule_autosave(&debounce, &state_clone);
     });
 
     stt_group.add(&stt_model_row);
@@ -130,6 +159,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     dark_mode_row.set_active(state.borrow().settings.dark_mode);
 
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     dark_mode_row.connect_active_notify(move |row| {
         let is_dark = row.is_active();
         state_clone.borrow_mut().settings.dark_mode = is_dark;
@@ -143,6 +173,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
                 adw::ColorScheme::ForceLight
             });
         }
+        schedule_autosave(&debounce, &state_clone);
     });
 
     appearance_group.add(&dark_mode_row);
@@ -162,10 +193,12 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
 
     let window_clone = window.clone();
     let state_clone = state.clone();
+    let debounce = save_debounce.clone();
     opacity_scale.connect_value_changed(move |scale| {
         let opacity = scale.value();
         state_clone.borrow_mut().settings.window_opacity = opacity;
         window_clone.set_opacity(opacity);
+        schedule_autosave(&debounce, &state_clone);
     });
 
     opacity_row.add_suffix(&opacity_scale);
@@ -173,23 +206,6 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     appearance_group.add(&opacity_row);
 
     page.add(&appearance_group);
-
-    // Save button
-    let save_group = adw::PreferencesGroup::new();
-
-    let save_btn = gtk4::Button::with_label("Save Settings");
-    save_btn.add_css_class("suggested-action");
-    save_btn.set_margin_top(16);
-
-    let state_clone = state.clone();
-    save_btn.connect_clicked(move |_| {
-        if let Err(e) = state_clone.borrow().save() {
-            tracing::error!("Failed to save settings: {}", e);
-        }
-    });
-
-    save_group.add(&save_btn);
-    page.add(&save_group);
 
     // Wrap in ScrolledWindow to allow vertical resize
     let scroll = ScrolledWindow::builder()
