@@ -200,7 +200,6 @@ fn build_controls(
             }
         }
     });
-
     controls
 }
 
@@ -250,7 +249,7 @@ fn rebuild_list(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
     }
 }
 
-/// Build a single meeting row with action buttons
+/// Build a single meeting row: title/subtitle + action buttons
 fn build_meeting_row(
     meeting: &crate::core::meeting::Meeting,
     state: &Rc<RefCell<AppState>>,
@@ -278,10 +277,21 @@ fn build_meeting_row(
         meeting.started_at_display()
     ));
 
+    row.add_suffix(&build_meeting_actions(meeting, state, container));
+    row
+}
+
+/// Build the full action button strip for a meeting row:
+/// play | [transcription controls] | delete
+fn build_meeting_actions(
+    meeting: &crate::core::meeting::Meeting,
+    state: &Rc<RefCell<AppState>>,
+    container: &GtkBox,
+) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 4);
     actions.set_valign(gtk4::Align::Center);
 
-    // Play button (always available for completed meetings)
+    // Play button (available for all non-recording meetings)
     if meeting.status != MeetingStatus::Recording {
         let play_btn = Button::from_icon_name("media-playback-start-symbolic");
         play_btn.set_tooltip_text(Some("Play recording"));
@@ -296,9 +306,63 @@ fn build_meeting_row(
                 }
             }
         });
-
         actions.append(&play_btn);
     }
+
+    // Status-dependent transcription pipeline buttons
+    actions.append(&build_transcription_controls(meeting, state, container));
+
+    // Delete button
+    let delete_btn = Button::from_icon_name("user-trash-symbolic");
+    delete_btn.set_tooltip_text(Some("Delete meeting"));
+    delete_btn.add_css_class("flat");
+    delete_btn.set_valign(gtk4::Align::Center);
+
+    let meeting_id = meeting.id.clone();
+    let state_c = state.clone();
+    let container_c = container.clone();
+
+    delete_btn.connect_clicked(move |btn| {
+        let dialog = adw::MessageDialog::new(
+            btn.root()
+                .and_then(|r| r.downcast::<gtk4::Window>().ok())
+                .as_ref(),
+            Some("Delete meeting recording?"),
+            Some("This will delete the audio, transcript, and analysis. This cannot be undone."),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("delete", "Delete");
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+
+        let meeting_id_c = meeting_id.clone();
+        let state_cc = state_c.clone();
+        let container_cc = container_c.clone();
+
+        dialog.connect_response(None, move |d, response| {
+            if response == "delete" {
+                if let Err(e) = MeetingManager::delete(&meeting_id_c) {
+                    tracing::error!("Failed to delete meeting: {}", e);
+                }
+                rebuild_list(&container_cc, &state_cc);
+            }
+            d.close();
+        });
+        dialog.present();
+    });
+    actions.append(&delete_btn);
+    actions
+}
+
+/// Build status-dependent transcription pipeline buttons:
+/// Transcribe (Completed) → Analyze (Transcribed) → View (Transcribed | Analyzed)
+fn build_transcription_controls(
+    meeting: &crate::core::meeting::Meeting,
+    state: &Rc<RefCell<AppState>>,
+    container: &GtkBox,
+) -> GtkBox {
+    let controls = GtkBox::new(Orientation::Horizontal, 4);
+    controls.set_valign(gtk4::Align::Center);
 
     // Transcribe button (only if completed, not yet transcribed)
     if meeting.status == MeetingStatus::Completed {
@@ -326,7 +390,6 @@ fn build_meeting_row(
                 return;
             }
 
-            // Update status to Transcribing
             if let Ok(mut m) = MeetingManager::load(&meeting_id) {
                 m.status = MeetingStatus::Transcribing;
                 let _ = MeetingManager::save(&m);
@@ -361,17 +424,14 @@ fn build_meeting_row(
                         let _ = MeetingManager::save(&m);
                     }
                 }
-
                 rebuild_list(&container_cc, &state_cc);
             });
-
             rebuild_list(&container_c, &state_c);
         });
-
-        actions.append(&transcribe_btn);
+        controls.append(&transcribe_btn);
     }
 
-    // Analyze button (only if transcribed)
+    // Analyze button (only if transcribed, not yet analyzed)
     if meeting.status == MeetingStatus::Transcribed {
         let analyze_btn = Button::from_icon_name("starred-symbolic");
         analyze_btn.set_tooltip_text(Some("Analyze with AI"));
@@ -416,8 +476,7 @@ fn build_meeting_row(
                 rebuild_list(&container_cc, &state_cc);
             });
         });
-
-        actions.append(&analyze_btn);
+        controls.append(&analyze_btn);
     }
 
     // View transcript/analysis button (if available)
@@ -450,54 +509,9 @@ fn build_meeting_row(
 
             show_transcript_dialog(window.as_ref(), &meeting_title, &content);
         });
-
-        actions.append(&view_btn);
+        controls.append(&view_btn);
     }
-
-    // Delete button
-    let delete_btn = Button::from_icon_name("user-trash-symbolic");
-    delete_btn.set_tooltip_text(Some("Delete meeting"));
-    delete_btn.add_css_class("flat");
-    delete_btn.set_valign(gtk4::Align::Center);
-
-    let meeting_id = meeting.id.clone();
-    let state_c = state.clone();
-    let container_c = container.clone();
-
-    delete_btn.connect_clicked(move |btn| {
-        let dialog = adw::MessageDialog::new(
-            btn.root()
-                .and_then(|r| r.downcast::<gtk4::Window>().ok())
-                .as_ref(),
-            Some("Delete meeting recording?"),
-            Some("This will delete the audio, transcript, and analysis. This cannot be undone."),
-        );
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("delete", "Delete");
-        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-
-        let meeting_id_c = meeting_id.clone();
-        let state_cc = state_c.clone();
-        let container_cc = container_c.clone();
-
-        dialog.connect_response(None, move |d, response| {
-            if response == "delete" {
-                if let Err(e) = MeetingManager::delete(&meeting_id_c) {
-                    tracing::error!("Failed to delete meeting: {}", e);
-                }
-                rebuild_list(&container_cc, &state_cc);
-            }
-            d.close();
-        });
-
-        dialog.present();
-    });
-
-    actions.append(&delete_btn);
-    row.add_suffix(&actions);
-
-    row
+    controls
 }
 
 /// Open audio file with the system's default player
