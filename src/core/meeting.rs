@@ -343,7 +343,7 @@ fn append_transcription(
 /// Call this from a blocking thread.
 pub fn analyze_meeting(meeting_id: &str, api_key: &str, model: &str) -> Result<String> {
     use crate::core::api::GroqClient;
-    use crate::core::state::Message;
+    use crate::core::state::{Message, Role};
 
     let transcript = MeetingManager::get_transcript(meeting_id)
         .ok_or_else(|| anyhow::anyhow!("No transcript found for meeting {}", meeting_id))?;
@@ -363,7 +363,7 @@ pub fn analyze_meeting(meeting_id: &str, api_key: &str, model: &str) -> Result<S
         Be concise and structured. Use markdown formatting.";
 
     let messages = vec![Message {
-        role: "user".to_string(),
+        role: Role::User,
         content: format!("Analyze this meeting transcript:\n\n{}", transcript),
     }];
 

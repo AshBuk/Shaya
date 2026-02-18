@@ -13,7 +13,7 @@
 use super::{audio, markdown, messaging};
 use crate::core::api::groq::ImageData;
 use crate::core::audio::{AudioRecorder, ListenRecorder};
-use crate::core::state::{AppState, Conversation};
+use crate::core::state::{AppState, Conversation, Role};
 use chrono::Utc;
 use gtk4::prelude::*;
 use gtk4::{
@@ -242,7 +242,7 @@ pub fn build_input(
             let title = state_mut
                 .current_messages
                 .iter()
-                .find(|m| m.role == "user")
+                .find(|m| m.role == Role::User)
                 .map(|m| {
                     let trimmed: String = m.content.chars().take(50).collect();
                     if m.content.chars().count() > 50 {

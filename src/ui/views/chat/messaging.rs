@@ -10,7 +10,7 @@ use super::markdown;
 use crate::core::api::groq::ImageData;
 use crate::core::api::GroqClient;
 use crate::core::capture;
-use crate::core::state::{AppState, Message};
+use crate::core::state::{AppState, Message, Role};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -124,7 +124,7 @@ pub fn send_message(ctx: &ChatContext) {
     };
 
     ctx.state.borrow_mut().current_messages.push(Message {
-        role: "user".to_string(),
+        role: Role::User,
         content: user_content,
     });
 
@@ -150,7 +150,7 @@ pub fn send_message(ctx: &ChatContext) {
         match result {
             Ok(Ok(response)) => {
                 ctx_c.state.borrow_mut().current_messages.push(Message {
-                    role: "assistant".to_string(),
+                    role: Role::Assistant,
                     content: response,
                 });
                 update_chat_display(&ctx_c.chat_view, &ctx_c.state.borrow());
@@ -187,7 +187,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
         .current_messages
         .iter()
         .map(|m| {
-            let prefix = if m.role == "user" {
+            let prefix = if m.role == Role::User {
                 "👤 You"
             } else {
                 "🤖 AI"
