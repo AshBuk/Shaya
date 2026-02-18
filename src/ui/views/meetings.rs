@@ -6,7 +6,7 @@
 
 //! Meetings View - Record, transcribe, and analyze meetings
 
-use crate::core::audio::meeting::{convert_meeting_to_opus, MeetingRecorder};
+use crate::core::audio::meet_recorder::{convert_meeting_to_opus, MeetingRecorder};
 use crate::core::meeting::{self, MeetingManager, MeetingStatus};
 use crate::core::state::AppState;
 use adw::prelude::*;
