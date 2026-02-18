@@ -10,6 +10,7 @@ use crate::core::models::{DEFAULT_MODEL, DEFAULT_STT_MODEL};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 /// Application settings
@@ -157,9 +158,11 @@ impl AppState {
         let config_path = Self::config_path();
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)?;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&config_path, content)?;
+        fs::write(&config_path, &content)?;
+        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))?;
         tracing::info!("Settings saved to {:?}", config_path);
         Ok(())
     }
