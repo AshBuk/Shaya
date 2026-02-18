@@ -80,7 +80,7 @@ fn rebuild_content(
         list.set_margin_end(12);
 
         // Iterate in reverse (newest first)
-        for (index, conv) in state_ref.history.iter().enumerate().rev() {
+        for conv in state_ref.history.iter().rev() {
             let row = adw::ActionRow::new();
             row.set_title(&conv.title);
             row.set_subtitle(&format!(
@@ -96,6 +96,7 @@ fn rebuild_content(
             delete_btn.set_tooltip_text(Some("Delete conversation"));
 
             {
+                let conv_id = conv.id.clone();
                 let state_c = state.clone();
                 let container_c = container.clone();
                 let stack_c = stack.clone();
@@ -114,6 +115,7 @@ fn rebuild_content(
                     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
                     dialog.set_default_response(Some("cancel"));
 
+                    let conv_id_c = conv_id.clone();
                     let state_cc = state_c.clone();
                     let container_cc = container_c.clone();
                     let stack_cc = stack_c.clone();
@@ -122,11 +124,9 @@ fn rebuild_content(
                     dialog.connect_response(None, move |d, response| {
                         if response == "delete" {
                             let mut state_mut = state_cc.borrow_mut();
-                            if index < state_mut.history.len() {
-                                state_mut.history.remove(index);
-                                if let Err(e) = state_mut.save() {
-                                    tracing::error!("Failed to save after delete: {}", e);
-                                }
+                            state_mut.history.retain(|c| c.id != conv_id_c);
+                            if let Err(e) = state_mut.save() {
+                                tracing::error!("Failed to save after delete: {}", e);
                             }
                             drop(state_mut);
                             rebuild_content(&container_cc, &state_cc, &stack_cc, &chat_view_cc);
