@@ -31,7 +31,7 @@ pub struct Screenshot {
 }
 
 /// Capture user-selected area (sync path).
-/// Wayland: slurp + grim (wlroots). X11: gnome-screenshot -a.
+/// Wayland wlroots: slurp + grim. KDE: spectacle -r. X11: gnome-screenshot -a.
 /// GNOME Wayland uses the async XDG portal instead — see `take_screenshot_async`.
 pub fn capture_area() -> Result<Screenshot, String> {
     if requires_async_portal() {
@@ -49,12 +49,16 @@ pub fn capture_area() -> Result<Screenshot, String> {
 
     if is_wayland() && has_command("slurp") && has_command("grim") {
         capture_area_slurp_grim(&output_path)?;
+    } else if has_command("spectacle") {
+        capture_area_spectacle(&output_path)?;
     } else if has_command("gnome-screenshot") {
         capture_area_gnome(&output_path)?;
     } else {
-        return Err("No area capture tool. Install: slurp+grim or gnome-screenshot".to_string());
+        return Err(
+            "No area capture tool. Install: slurp+grim (wlroots), spectacle (KDE), or gnome-screenshot"
+                .to_string(),
+        );
     }
-
     read_and_encode(&output_path)
 }
 
@@ -70,7 +74,6 @@ pub fn take_screenshot() -> Result<Screenshot, String> {
     } else {
         take_x11_screenshot(&output_path)
     };
-
     result?;
     read_and_encode(&output_path)
 }
@@ -139,7 +142,6 @@ fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
     if geometry.is_empty() {
         return Err("No area selected".to_string());
     }
-
     tracing::info!("Selected area: {}", geometry);
 
     // Capture with grim
@@ -154,8 +156,27 @@ fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
     if !status.success() {
         return Err("grim capture failed".to_string());
     }
-
     Ok(())
+}
+
+/// Capture area using spectacle -r (KDE Plasma, Wayland and X11).
+fn capture_area_spectacle(output: &Path) -> Result<(), String> {
+    let status = Command::new("spectacle")
+        .args(["-r", "-b", "-n", "-o", output.to_string_lossy().as_ref()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("Failed to run spectacle: {}", e))?;
+
+    if !status.success() {
+        return Err("Area selection cancelled".to_string());
+    }
+    if output.exists() {
+        Ok(())
+    } else {
+        Err("spectacle succeeded but file was not created".to_string())
+    }
 }
 
 /// Capture area using gnome-screenshot -a (X11 only).
