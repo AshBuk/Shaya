@@ -195,10 +195,17 @@ impl MeetingManager {
     /// Find any audio file for playback (prefers OPUS, falls back to WAV)
     pub fn find_playback_file(meeting_id: &str) -> Option<PathBuf> {
         let dir = Self::meeting_dir(meeting_id);
-        ["system.opus", "system.wav", "mic.opus", "mic.wav"]
-            .iter()
-            .map(|name| dir.join(name))
-            .find(|p| p.exists())
+        [
+            "mixed.opus",
+            "mixed.wav",
+            "system.opus",
+            "system.wav",
+            "mic.opus",
+            "mic.wav",
+        ]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|p| p.exists())
     }
 
     /// Find audio files for transcription: WAV first (chunkable), OPUS as fallback

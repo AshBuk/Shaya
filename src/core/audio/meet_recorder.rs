@@ -129,9 +129,20 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
         }
     };
 
+    // Build a mixed track for playback when both sources exist.
+    let system_wav = dir.join("system.wav");
+    let mic_wav = dir.join("mic.wav");
+    let mixed_wav = dir.join("mixed.wav");
+    if system_wav.exists() && mic_wav.exists() {
+        match run_ffmpeg_mix(&system_wav, &mic_wav, &mixed_wav) {
+            Ok(()) => tracing::info!("Created mixed.wav from system + mic"),
+            Err(e) => tracing::warn!("Failed to create mixed.wav: {}", e),
+        }
+    }
+
     let mut any_converted = false;
 
-    for name in &["system.wav", "mic.wav"] {
+    for name in &["system.wav", "mic.wav", "mixed.wav"] {
         let wav_path = dir.join(name);
         if !wav_path.exists() {
             continue;
@@ -222,5 +233,40 @@ fn run_ffmpeg(wav: &Path, opus: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("ffmpeg exited with {}", status))
+    }
+}
+
+fn run_ffmpeg_mix(system_wav: &Path, mic_wav: &Path, mixed_wav: &Path) -> Result<(), String> {
+    if !command_exists("ffmpeg") {
+        return Err("ffmpeg not found".to_string());
+    }
+
+    let status = Command::new("ffmpeg")
+        .args([
+            "-i",
+            &system_wav.to_string_lossy(),
+            "-i",
+            &mic_wav.to_string_lossy(),
+            "-filter_complex",
+            "amix=inputs=2:duration=longest:dropout_transition=0",
+            "-c:a",
+            "pcm_s16le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-y",
+            &mixed_wav.to_string_lossy(),
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|e| format!("ffmpeg mix failed: {}", e))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ffmpeg mix exited with {}", status))
     }
 }
