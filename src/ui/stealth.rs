@@ -102,9 +102,6 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     // Apply saved appearance settings
     apply_appearance_settings(&window, &state);
 
-    // Keyboard shortcut: Ctrl+Alt+A = hide window
-    setup_keyboard_shortcuts(&window);
-
     // Build UI structure
     let main_box = GtkBox::new(Orientation::Vertical, 0);
 
@@ -305,7 +302,7 @@ fn show_window(window: &ApplicationWindow) {
     window.present();
 }
 
-/// Toggle window visibility (shared by SIGUSR1 and keyboard shortcut)
+/// Toggle window visibility (called by SIGUSR1 on re-run)
 fn toggle_window(window: &ApplicationWindow) {
     let hidden = WINDOW_HIDDEN.with(|h| h.get());
     if hidden {
@@ -313,27 +310,4 @@ fn toggle_window(window: &ApplicationWindow) {
     } else {
         hide_window(window);
     }
-}
-
-/// Setup keyboard shortcuts (only works when window is focused)
-fn setup_keyboard_shortcuts(window: &ApplicationWindow) {
-    let controller = gtk4::EventControllerKey::new();
-    let window_c = window.clone();
-
-    controller.connect_key_pressed(move |_, key, _, modifiers| {
-        use gtk4::gdk::{Key, ModifierType};
-
-        // Ctrl+Alt+A = toggle window (show/hide via SIGUSR1 or re-run binary)
-        if key == Key::a
-            && modifiers.contains(ModifierType::CONTROL_MASK)
-            && modifiers.contains(ModifierType::ALT_MASK)
-        {
-            toggle_window(&window_c);
-            return glib::Propagation::Stop;
-        }
-
-        glib::Propagation::Proceed
-    });
-
-    window.add_controller(controller);
 }
