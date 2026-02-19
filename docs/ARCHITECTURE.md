@@ -6,7 +6,7 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 
 ## Core Principle
 
-**One Rust binary, one unified stealth window:**
+**One Rust binary, one unified window:**
 - **Unified Window** — GTK4 + layer-shell + libadwaita (ALL functionality in one invisible window)
 
 **No web technologies. Pure native GTK4.**
