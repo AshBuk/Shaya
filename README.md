@@ -2,7 +2,7 @@
 
 **Native AI assistant for Linux.**
 
-Your quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on your desktop — invisible to screen sharing on Wayland — and gives you instant access to AI chat, voice transcription, and screenshots — only you know it's there.
+Your quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on your desktop — invisible (as much as possible) to screen sharing on Wayland — and gives you instant access to AI chat, voice transcription, and screenshots — only you know it's there.
 
 One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 
