@@ -1,23 +1,10 @@
 # Shaya
 
-**Native AI assistant for Linux.**
+**Native AI assistant tool for Linux.**
 
-Your quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on your desktop — invisible (as much as possible) to screen sharing on Wayland — and gives you instant access to AI chat, voice transcription, and screenshots — only you know it's there.
+Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, and screenshots — invisible (as much as possible) to screen sharing on Wayland — only you know it's there.
 
 One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
-
----
-
-## Why Shaya Was Built
-
-Existing AI assistants (Cluely, etc.) ship bloated Electron wrappers that eat RAM, leak into screen shares, and feel alien on Linux.
-
-Shaya is a **boutique tool** built for Linux users who care about their stack:
-
-- **GTK4 + libadwaita** — first-class GNOME/Wayland citizen
-- **Layer Shell** — true compositor-level invisibility, not a hack
-- **Single binary** — no runtime, no daemon, no dependencies beyond GTK
-- **Privacy-first** — your API keys stay local, nothing phones home
 
 ---
 
@@ -31,23 +18,28 @@ Shaya is a **boutique tool** built for Linux users who care about their stack:
 | **Meeting Recorder** | Capture mic + system audio, transcribe, get AI analysis |
 | **Prompt Library** | Manage and switch system prompts for different scenarios |
 | **Conversation History** | Browse, continue, or delete past sessions |
+| **Appearance** | Adjustable opacity, light/dark theme |
+| **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |
 | **Stealth Mode** | Invisible overlay on Wayland — hidden from Zoom, Meet, OBS |
-| **Quick Toggle** | `Super+A` to show/hide instantly; adjustable opacity, light/dark theme |
 
 ---
 
-## Overlay Behavior
+## Why Shaya Was Built
+
+Most existing AI assistants of that class ship bloated Electron/WebView wrappers that eat RAM and feel alien on Linux.
+
+Shaya is a **boutique tool** built for Linux users who care about their stack:
+
+- **GTK4 + libadwaita** — GNU/GNOME native, first-class Wayland citizen
+- **Layer Shell** — compositor-level overlay via wlr-layer-shell protocol
+- **Single binary** — no runtime, no daemon, no dependencies beyond GTK
+- **Privacy-first** — your API keys stay local, nothing phones home
+
+#### Overlay Behavior
 
 Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears during screen sharing depends on your compositor:
 
-| Compositor | Overlay | Notes |
-|------------|---------|-------|
-| **Hyprland** | Fully hidden | Requires a one-line compositor rule |
-| **Sway** | Stays out of Alt+Tab | Visible in screen capture |
-| **KDE Plasma** | Stays out of Alt+Tab | Visible in screen capture |
-| **GNOME Wayland** | Regular window | No layer-shell; share a specific app window instead |
-
-> See [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor setup and workarounds.
+> See [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor setup, workarounds, and cross-platform research.
 
 ---
 
@@ -90,13 +82,15 @@ cargo build --release
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — project structure, design decisions, state management
+- [ARCHITECTURE](docs/ARCHITECTURE.md) — project structure, design decisions, state management
+- [DEVELOPMENT](docs/DEVELOPMENT.md) — dependencies, build setup, scripts
+
+### [Apache-2.0](LICENSE) LICENSE
 
 ---
 
-## License
+Sharing with the community for privacy-conscious Linux users.
 
-[Apache-2.0](LICENSE)
+Link back to this repo and ⭐ it if it helped you.
 
----
-
+[![Sponsor](https://img.shields.io/badge/Sponsor-💖-pink?style=for-the-badge&logo=github)](https://github.com/sponsors/AshBuk) [![PayPal](https://img.shields.io/badge/PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.com/donate/?hosted_button_id=R3HZH8DX7SCJG)

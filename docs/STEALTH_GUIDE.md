@@ -19,7 +19,7 @@ Always-on-top works automatically on compositors with `wlr-layer-shell` support 
 2. Enable **"Always on Top"**
 3. Enable **"Always on Visible Workspace"**
 
-This must be done manually each time the app starts, or use a GNOME extension to automate it.
+This must be done manually each time the app starts, or automated via DE-specific tools (GNOME extensions, KWin window rules, devilspie2, wmctrl, etc.).
 
 ---
 
@@ -41,6 +41,8 @@ This must be done manually each time the app starts, or use a GNOME extension to
 
 **Hyprland Configuration**
 
+Add this rule to black out Shaya's content in screenshots and screen sharing:
+
 ```ini
 layerrule = no_screen_share on, match:namespace shaya-stealth
 ```
@@ -49,7 +51,7 @@ layerrule = no_screen_share on, match:namespace shaya-stealth
 
 ## Fallback: Window Sharing
 
-If stealth is unavailable (Sway, KDE, GNOME, X11), share a **specific app window** in Zoom/Meet/OBS instead of the full screen.
+If stealth is unavailable on your DE/Compositor, share a **specific app window** in Zoom/Meet/OBS instead of the full screen.
 
 This keeps Shaya out of the shared content as long as the overlay stays on a different surface/workspace.
 
