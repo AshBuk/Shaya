@@ -1,4 +1,7 @@
-# Shaya
+<div align="center">
+<img src="icons/shaya.svg" width="180" height="180" alt="Shaya"/>
+<h1>Shaya</h1>
+</div>
 
 **Native AI assistant tool for Linux.**
 
