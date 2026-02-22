@@ -341,8 +341,13 @@ fn append_transcription(
 
 /// Analyze a meeting transcript using AI.
 /// Call this from a blocking thread.
-pub fn analyze_meeting(meeting_id: &str, api_key: &str, model: &str) -> Result<String> {
-    use crate::core::api::GroqClient;
+pub fn analyze_meeting(
+    meeting_id: &str,
+    provider: crate::core::state::AiProvider,
+    api_key: &str,
+    model: &str,
+) -> Result<String> {
+    use crate::core::api::LlmClient;
     use crate::core::state::{Message, Role};
 
     let transcript = MeetingManager::get_transcript(meeting_id)
@@ -352,7 +357,7 @@ pub fn analyze_meeting(meeting_id: &str, api_key: &str, model: &str) -> Result<S
         anyhow::bail!("Transcript is empty for meeting {}", meeting_id);
     }
 
-    let client = GroqClient::new(api_key, model);
+    let client = LlmClient::new(provider, api_key, model);
 
     let system_prompt =
         "You are a meeting analyst. Analyze the following meeting transcript and provide:\n\

@@ -7,8 +7,8 @@
 //! Messaging handlers - chat messages and screenshots
 
 use super::markdown;
-use crate::core::api::groq::ImageData;
-use crate::core::api::GroqClient;
+use crate::core::api::llm::ImageData;
+use crate::core::api::LlmClient;
 use crate::core::capture;
 use crate::core::state::{AppState, Message, Role};
 use gtk4::gio;
@@ -133,16 +133,17 @@ pub fn send_message(ctx: &ChatContext) {
         return;
     }
 
-    let (api_key, model, system_prompt) = {
+    let (provider, api_key, model, system_prompt) = {
         let s = ctx.state.borrow();
-        if s.settings.api_key.is_empty() {
+        if s.settings.active_api_key().is_empty() {
             ctx.status_label.set_text("⚠️ Set API key in Settings");
             ctx.status_label.set_visible(true);
             return;
         }
         (
-            s.settings.api_key.clone(),
-            s.settings.model.clone(),
+            s.settings.provider,
+            s.settings.active_api_key().to_string(),
+            s.settings.active_model().to_string(),
             s.active_prompt(),
         )
     };
@@ -176,7 +177,7 @@ pub fn send_message(ctx: &ChatContext) {
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = GroqClient::new(&api_key, &model);
+            let client = LlmClient::new(provider, &api_key, &model);
             client
                 .chat_with_image(&messages, &system_prompt, attached.as_ref())
                 .map_err(|e| e.to_string())

@@ -11,7 +11,7 @@
 //! - `build_input` - interactive controls (control panel)
 
 use super::{audio, markdown, messaging};
-use crate::core::api::groq::ImageData;
+use crate::core::api::llm::ImageData;
 use crate::core::audio::{AudioRecorder, ListenRecorder};
 use crate::core::state::{AppState, Conversation, Role};
 use chrono::Utc;

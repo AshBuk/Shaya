@@ -445,9 +445,13 @@ fn build_transcription_controls(
         analyze_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
 
-            let (api_key, model) = {
+            let (provider, api_key, model) = {
                 let s = state_c.borrow();
-                (s.settings.api_key.clone(), s.settings.model.clone())
+                (
+                    s.settings.provider,
+                    s.settings.active_api_key().to_string(),
+                    s.settings.active_model().to_string(),
+                )
             };
 
             if api_key.is_empty() {
@@ -463,7 +467,8 @@ fn build_transcription_controls(
             glib::spawn_future_local(async move {
                 let id = meeting_id_c.clone();
                 let result = gio::spawn_blocking(move || {
-                    meeting::analyze_meeting(&id, &api_key, &model).map_err(|e| e.to_string())
+                    meeting::analyze_meeting(&id, provider, &api_key, &model)
+                        .map_err(|e| e.to_string())
                 })
                 .await;
 
