@@ -213,7 +213,7 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
 
     if state.current_messages.is_empty() {
         buffer.set_text(
-            "Welcome to Shaya 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
+            "Shaya AI 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
         );
         return;
     }
