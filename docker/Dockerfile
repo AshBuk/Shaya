@@ -40,9 +40,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Build gtk4-layer-shell from source
-RUN git clone https://github.com/wmww/gtk4-layer-shell.git \
+RUN git clone --depth 1 --branch v1.3.0 https://github.com/wmww/gtk4-layer-shell.git \
     && cd gtk4-layer-shell \
-    && git checkout v1.0.3 \
     && meson setup build -Dvapi=false -Dintrospection=false \
     && ninja -C build \
     && ninja -C build install \
