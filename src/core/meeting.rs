@@ -233,7 +233,12 @@ impl MeetingManager {
 /// Transcribe a meeting's audio files.
 /// WAV files are chunked via hound; OPUS files are sent directly to Whisper API.
 /// Call this from a blocking thread (not the GTK main loop).
-pub fn transcribe_meeting(meeting_id: &str, stt_api_key: &str, stt_model: &str) -> Result<String> {
+pub fn transcribe_meeting(
+    meeting_id: &str,
+    stt_provider: crate::core::state::SttProvider,
+    stt_api_key: &str,
+    stt_model: &str,
+) -> Result<String> {
     let audio_files = MeetingManager::find_transcribable_files(meeting_id);
     if audio_files.is_empty() {
         anyhow::bail!("No audio files found for meeting {}", meeting_id);
@@ -244,7 +249,7 @@ pub fn transcribe_meeting(meeting_id: &str, stt_api_key: &str, stt_model: &str) 
         .and_then(|p| p.extension())
         .is_some_and(|ext| ext == "wav");
 
-    let client = WhisperClient::new(stt_api_key, stt_model);
+    let client = WhisperClient::new(stt_provider, stt_api_key, stt_model);
     let mut full_transcript = String::new();
     let multi_source = audio_files.len() > 1;
 

@@ -379,9 +379,13 @@ fn build_transcription_controls(
             btn.set_sensitive(false);
             btn.set_tooltip_text(Some("Transcribing..."));
 
-            let (stt_key, stt_model) = {
+            let (stt_provider, stt_key, stt_model) = {
                 let s = state_c.borrow();
-                (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
+                (
+                    s.settings.stt_provider,
+                    s.settings.active_stt_key().to_string(),
+                    s.settings.active_stt_model().to_string(),
+                )
             };
 
             if stt_key.is_empty() {
@@ -402,7 +406,7 @@ fn build_transcription_controls(
             glib::spawn_future_local(async move {
                 let id = meeting_id_c.clone();
                 let result = gio::spawn_blocking(move || {
-                    meeting::transcribe_meeting(&id, &stt_key, &stt_model)
+                    meeting::transcribe_meeting(&id, stt_provider, &stt_key, &stt_model)
                         .map_err(|e| e.to_string())
                 })
                 .await;

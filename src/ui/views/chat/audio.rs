@@ -97,9 +97,13 @@ fn transcribe_and_insert(
     entry: &Entry,
     prefix: Option<&str>,
 ) {
-    let (stt_key, stt_model) = {
+    let (stt_provider, stt_key, stt_model) = {
         let s = state.borrow();
-        (s.settings.stt_api_key.clone(), s.settings.stt_model.clone())
+        (
+            s.settings.stt_provider,
+            s.settings.active_stt_key().to_string(),
+            s.settings.active_stt_model().to_string(),
+        )
     };
     if stt_key.is_empty() {
         status_label.set_text("⚠️ Set STT API key in Settings");
@@ -142,7 +146,7 @@ fn transcribe_and_insert(
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = WhisperClient::new(&stt_key, &stt_model);
+            let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
             client.transcribe(&audio_path).map_err(|e| e.to_string())
         })
         .await;
