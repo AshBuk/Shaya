@@ -6,10 +6,10 @@
 
 //! Settings View - API keys and configuration
 
-use crate::core::models::{MODELS, STT_MODELS};
-use crate::core::state::AppState;
+use crate::core::models::{models_for_provider, STT_MODELS};
+use crate::core::state::{AiProvider, AppState};
 use adw::prelude::*;
-use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow};
+use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow, StringList};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -31,102 +31,153 @@ fn schedule_autosave(debounce: &Rc<Cell<Option<glib::SourceId>>>, state: &Rc<Ref
     debounce.set(Some(source_id));
 }
 
+/// Rebuild model combo row items for the given provider
+fn rebuild_model_list(model_row: &adw::ComboRow, provider: AiProvider, current_model: &str) {
+    let models = models_for_provider(provider);
+    let names: Vec<String> = models
+        .iter()
+        .map(|m| {
+            if m.supports_vision {
+                format!("👁\u{fe0f} {}", m.display_name)
+            } else {
+                m.display_name.to_string()
+            }
+        })
+        .collect();
+    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    model_row.set_model(Some(&StringList::new(&refs)));
+
+    let idx = models
+        .iter()
+        .position(|m| m.id == current_model)
+        .unwrap_or(0);
+    model_row.set_selected(idx as u32);
+}
+
 /// Build the settings view
 pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
     let vbox = GtkBox::new(gtk4::Orientation::Vertical, 0);
-
     let page = adw::PreferencesPage::new();
 
     // Shared debounce timer — all setting changes funnel through this one timer,
     // so a burst of edits (e.g. typing an API key) produces only one disk write.
     let save_debounce: Rc<Cell<Option<glib::SourceId>>> = Rc::new(Cell::new(None));
 
+    // Guard flag to prevent recursive updates when switching provider
+    let updating = Rc::new(Cell::new(false));
+
     // AI Provider group
     let ai_group = adw::PreferencesGroup::new();
     ai_group.set_title("AI Provider");
-    ai_group.set_description(Some("Configure your AI provider (Groq)"));
 
-    // API Key
+    // Provider selector
+    let provider_row = adw::ComboRow::new();
+    provider_row.set_title("Provider");
+    let provider_names: Vec<&str> = AiProvider::ALL.iter().map(|p| p.display_name()).collect();
+    provider_row.set_model(Some(&StringList::new(&provider_names)));
+    let current_provider = state.borrow().settings.provider;
+    let provider_idx = AiProvider::ALL
+        .iter()
+        .position(|&p| p == current_provider)
+        .unwrap_or(0);
+    provider_row.set_selected(provider_idx as u32);
+    ai_group.add(&provider_row);
+
+    // API Key (shows key for selected provider)
     let api_key_row = adw::PasswordEntryRow::new();
     api_key_row.set_title("API Key");
-    api_key_row.set_text(&state.borrow().settings.api_key);
+    api_key_row.set_text(state.borrow().settings.active_api_key());
 
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
+    let updating_c = updating.clone();
     api_key_row.connect_changed(move |row| {
-        state_clone.borrow_mut().settings.api_key = row.text().to_string();
-        schedule_autosave(&debounce, &state_clone);
+        if updating_c.get() {
+            return;
+        }
+        state_c
+            .borrow_mut()
+            .settings
+            .set_active_api_key(row.text().to_string());
+        schedule_autosave(&debounce, &state_c);
     });
-
     ai_group.add(&api_key_row);
 
-    // Model selection (using MODELS constant)
+    // Model selection (shows models for selected provider)
     let model_row = adw::ComboRow::new();
     model_row.set_title("Model");
-    model_row.set_subtitle("Vision models marked with 👁️");
+    model_row.set_subtitle("Vision models marked with 👁\u{fe0f}");
+    rebuild_model_list(
+        &model_row,
+        current_provider,
+        state.borrow().settings.active_model(),
+    );
 
-    // Build display names with Vision indicator
-    let model_names: Vec<String> = MODELS
-        .iter()
-        .map(|m| {
-            if m.supports_vision {
-                format!("👁️ {}", m.display_name)
-            } else {
-                m.display_name.to_string()
-            }
-        })
-        .collect();
-    let model_names_refs: Vec<&str> = model_names.iter().map(|s| s.as_str()).collect();
-    let models = gtk4::StringList::new(&model_names_refs);
-    model_row.set_model(Some(&models));
-
-    // Set current model
-    let current_model = &state.borrow().settings.model;
-    let model_index = MODELS
-        .iter()
-        .position(|m| m.id == current_model)
-        .unwrap_or(0);
-    model_row.set_selected(model_index as u32);
-
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
+    let updating_c = updating.clone();
     model_row.connect_selected_notify(move |row| {
-        let idx = row.selected() as usize;
-        if let Some(m) = MODELS.get(idx) {
-            state_clone.borrow_mut().settings.model = m.id.to_string();
+        if updating_c.get() {
+            return;
         }
-        schedule_autosave(&debounce, &state_clone);
+        let provider = state_c.borrow().settings.provider;
+        let models = models_for_provider(provider);
+        let idx = row.selected() as usize;
+        if let Some(m) = models.get(idx) {
+            state_c
+                .borrow_mut()
+                .settings
+                .set_active_model(m.id.to_string());
+        }
+        schedule_autosave(&debounce, &state_c);
+    });
+    ai_group.add(&model_row);
+
+    // Wire provider selector to update API key + model dynamically
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    let api_key_c = api_key_row.clone();
+    let model_c = model_row.clone();
+    let updating_c = updating.clone();
+    provider_row.connect_selected_notify(move |row| {
+        let idx = row.selected() as usize;
+        let provider = AiProvider::ALL.get(idx).copied().unwrap_or_default();
+
+        updating_c.set(true);
+        state_c.borrow_mut().settings.provider = provider;
+        api_key_c.set_text(state_c.borrow().settings.active_api_key());
+        rebuild_model_list(&model_c, provider, state_c.borrow().settings.active_model());
+        updating_c.set(false);
+
+        schedule_autosave(&debounce, &state_c);
     });
 
-    ai_group.add(&model_row);
     page.add(&ai_group);
 
     // STT Provider group
     let stt_group = adw::PreferencesGroup::new();
     stt_group.set_title("Speech-to-Text");
-    stt_group.set_description(Some("Configure STT for audio transcription"));
+    stt_group.set_description(Some("Configure STT for audio transcription (Groq Whisper)"));
 
     // STT API Key
     let stt_key_row = adw::PasswordEntryRow::new();
     stt_key_row.set_title("STT API Key");
     stt_key_row.set_text(&state.borrow().settings.stt_api_key);
 
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
     stt_key_row.connect_changed(move |row| {
-        state_clone.borrow_mut().settings.stt_api_key = row.text().to_string();
-        schedule_autosave(&debounce, &state_clone);
+        state_c.borrow_mut().settings.stt_api_key = row.text().to_string();
+        schedule_autosave(&debounce, &state_c);
     });
-
     stt_group.add(&stt_key_row);
 
-    // STT Model (using STT_MODELS constant)
+    // STT Model
     let stt_model_row = adw::ComboRow::new();
     stt_model_row.set_title("STT Model");
 
     let stt_names: Vec<&str> = STT_MODELS.iter().map(|m| m.display_name).collect();
-    let stt_models = gtk4::StringList::new(&stt_names);
-    stt_model_row.set_model(Some(&stt_models));
+    stt_model_row.set_model(Some(&StringList::new(&stt_names)));
 
     let current_stt = &state.borrow().settings.stt_model;
     let stt_index = STT_MODELS
@@ -135,14 +186,14 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
         .unwrap_or(0);
     stt_model_row.set_selected(stt_index as u32);
 
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
     stt_model_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
         if let Some(m) = STT_MODELS.get(idx) {
-            state_clone.borrow_mut().settings.stt_model = m.id.to_string();
+            state_c.borrow_mut().settings.stt_model = m.id.to_string();
         }
-        schedule_autosave(&debounce, &state_clone);
+        schedule_autosave(&debounce, &state_c);
     });
 
     stt_group.add(&stt_model_row);
@@ -157,11 +208,11 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     dark_mode_row.set_subtitle("Use dark theme");
     dark_mode_row.set_active(state.borrow().settings.dark_mode);
 
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
     dark_mode_row.connect_active_notify(move |row| {
         let is_dark = row.is_active();
-        state_clone.borrow_mut().settings.dark_mode = is_dark;
+        state_c.borrow_mut().settings.dark_mode = is_dark;
 
         // Apply theme immediately
         if let Some(display) = gtk4::gdk::Display::default() {
@@ -172,7 +223,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
                 adw::ColorScheme::ForceLight
             });
         }
-        schedule_autosave(&debounce, &state_clone);
+        schedule_autosave(&debounce, &state_c);
     });
 
     appearance_group.add(&dark_mode_row);
@@ -191,13 +242,13 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     opacity_scale.set_format_value_func(|_, value| format!("{:.0}%", value * 100.0));
 
     let window_clone = window.clone();
-    let state_clone = state.clone();
+    let state_c = state.clone();
     let debounce = save_debounce.clone();
     opacity_scale.connect_value_changed(move |scale| {
         let opacity = scale.value();
-        state_clone.borrow_mut().settings.window_opacity = opacity;
+        state_c.borrow_mut().settings.window_opacity = opacity;
         window_clone.set_opacity(opacity);
-        schedule_autosave(&debounce, &state_clone);
+        schedule_autosave(&debounce, &state_c);
     });
 
     opacity_row.add_suffix(&opacity_scale);
