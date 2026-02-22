@@ -6,10 +6,10 @@
 
 //! AI API clients
 
-pub mod groq;
+pub mod llm;
 pub mod whisper;
 
-pub use groq::GroqClient;
+pub use llm::LlmClient;
 pub use whisper::WhisperClient;
 
 use serde::Deserialize;

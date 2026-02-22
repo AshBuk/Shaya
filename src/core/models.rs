@@ -6,6 +6,8 @@
 
 //! AI model constants
 
+use crate::core::state::AiProvider;
+
 pub struct ModelInfo {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -17,10 +19,14 @@ pub struct SttModelInfo {
     pub display_name: &'static str,
 }
 
+// --- Groq ---
+
+pub const DEFAULT_GROQ_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";
+
 /// Vision-capable model for fallback (used when non-Vision model selected + image attached)
 pub const VISION_FALLBACK_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-pub const MODELS: &[ModelInfo] = &[
+pub const GROQ_MODELS: &[ModelInfo] = &[
     ModelInfo {
         id: "meta-llama/llama-4-scout-17b-16e-instruct",
         display_name: "Llama 4 Scout 17B",
@@ -41,10 +47,85 @@ pub const MODELS: &[ModelInfo] = &[
         display_name: "Llama 3.1 8B",
         supports_vision: false,
     },
+    ModelInfo {
+        id: "openai/gpt-oss-120b",
+        display_name: "GPT-OSS 120B",
+        supports_vision: false,
+    },
+    ModelInfo {
+        id: "openai/gpt-oss-20b",
+        display_name: "GPT-OSS 20B",
+        supports_vision: false,
+    },
 ];
 
-/// Default model
-pub const DEFAULT_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";
+// --- OpenAI ---
+
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5.2";
+
+pub const OPENAI_MODELS: &[ModelInfo] = &[
+    ModelInfo {
+        id: "gpt-5.2",
+        display_name: "GPT-5.2",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "gpt-5-mini",
+        display_name: "GPT-5 Mini",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "gpt-5-nano",
+        display_name: "GPT-5 Nano",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "gpt-4.1",
+        display_name: "GPT-4.1",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "gpt-4.1-mini",
+        display_name: "GPT-4.1 Mini",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "o3",
+        display_name: "o3 (Reasoning)",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "o4-mini",
+        display_name: "o4 Mini (Reasoning)",
+        supports_vision: true,
+    },
+];
+
+// --- Anthropic ---
+
+pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
+
+pub const ANTHROPIC_MODELS: &[ModelInfo] = &[
+    ModelInfo {
+        id: "claude-opus-4-6",
+        display_name: "Claude Opus 4.6",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "claude-sonnet-4-6",
+        display_name: "Claude Sonnet 4.6",
+        supports_vision: true,
+    },
+    ModelInfo {
+        id: "claude-haiku-4-5",
+        display_name: "Claude Haiku 4.5",
+        supports_vision: true,
+    },
+];
+
+// --- STT (Groq-only for now) ---
+
+pub const DEFAULT_STT_MODEL: &str = "whisper-large-v3-turbo";
 
 pub const STT_MODELS: &[SttModelInfo] = &[
     SttModelInfo {
@@ -57,13 +138,22 @@ pub const STT_MODELS: &[SttModelInfo] = &[
     },
 ];
 
-/// Default STT model
-pub const DEFAULT_STT_MODEL: &str = "whisper-large-v3-turbo";
+// --- Helpers ---
 
-/// Check if model supports Vision
+/// Get model list for a given provider
+pub fn models_for_provider(provider: AiProvider) -> &'static [ModelInfo] {
+    match provider {
+        AiProvider::Groq => GROQ_MODELS,
+        AiProvider::OpenAI => OPENAI_MODELS,
+        AiProvider::Anthropic => ANTHROPIC_MODELS,
+    }
+}
+
+/// Check if model supports Vision (checks across all providers)
 pub fn supports_vision(model_id: &str) -> bool {
-    MODELS
+    [GROQ_MODELS, OPENAI_MODELS, ANTHROPIC_MODELS]
         .iter()
+        .flat_map(|list| list.iter())
         .find(|m| m.id == model_id)
         .is_some_and(|m| m.supports_vision)
 }

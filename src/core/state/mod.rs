@@ -6,18 +6,47 @@
 
 //! Application state with persistence
 
-use crate::core::models::{DEFAULT_MODEL, DEFAULT_STT_MODEL};
+use crate::core::models::{
+    DEFAULT_ANTHROPIC_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_STT_MODEL,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+/// AI provider selection
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProvider {
+    #[default]
+    Groq,
+    OpenAI,
+    Anthropic,
+}
+
+impl AiProvider {
+    pub const ALL: [AiProvider; 3] = [Self::Groq, Self::OpenAI, Self::Anthropic];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Groq => "Groq",
+            Self::OpenAI => "OpenAI",
+            Self::Anthropic => "Anthropic",
+        }
+    }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    pub api_key: String,
-    pub model: String,
+    pub provider: AiProvider,
+    pub groq_api_key: String,
+    pub groq_model: String,
+    pub openai_api_key: String,
+    pub openai_model: String,
+    pub anthropic_api_key: String,
+    pub anthropic_model: String,
     pub stt_api_key: String,
     pub stt_model: String,
     pub dark_mode: bool,
@@ -34,6 +63,44 @@ pub struct Settings {
     pub window_width: i32,
     #[serde(default = "default_window_height")]
     pub window_height: i32,
+}
+
+impl Settings {
+    /// Get API key for the active provider
+    pub fn active_api_key(&self) -> &str {
+        match self.provider {
+            AiProvider::Groq => &self.groq_api_key,
+            AiProvider::OpenAI => &self.openai_api_key,
+            AiProvider::Anthropic => &self.anthropic_api_key,
+        }
+    }
+
+    /// Get model for the active provider
+    pub fn active_model(&self) -> &str {
+        match self.provider {
+            AiProvider::Groq => &self.groq_model,
+            AiProvider::OpenAI => &self.openai_model,
+            AiProvider::Anthropic => &self.anthropic_model,
+        }
+    }
+
+    /// Set API key for the active provider
+    pub fn set_active_api_key(&mut self, key: String) {
+        match self.provider {
+            AiProvider::Groq => self.groq_api_key = key,
+            AiProvider::OpenAI => self.openai_api_key = key,
+            AiProvider::Anthropic => self.anthropic_api_key = key,
+        }
+    }
+
+    /// Set model for the active provider
+    pub fn set_active_model(&mut self, model: String) {
+        match self.provider {
+            AiProvider::Groq => self.groq_model = model,
+            AiProvider::OpenAI => self.openai_model = model,
+            AiProvider::Anthropic => self.anthropic_model = model,
+        }
+    }
 }
 
 fn default_opacity() -> f64 {
@@ -55,8 +122,13 @@ fn default_window_height() -> i32 {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            api_key: String::new(),
-            model: DEFAULT_MODEL.to_string(),
+            provider: AiProvider::default(),
+            groq_api_key: String::new(),
+            groq_model: DEFAULT_GROQ_MODEL.to_string(),
+            openai_api_key: String::new(),
+            openai_model: DEFAULT_OPENAI_MODEL.to_string(),
+            anthropic_api_key: String::new(),
+            anthropic_model: DEFAULT_ANTHROPIC_MODEL.to_string(),
             stt_api_key: String::new(),
             stt_model: DEFAULT_STT_MODEL.to_string(),
             dark_mode: true,
