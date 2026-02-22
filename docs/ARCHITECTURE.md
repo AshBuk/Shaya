@@ -65,7 +65,7 @@ Shaya/
 │   ├── main.rs              # Entry point
 │   ├── lib.rs               # Library root
 │   ├── core/
-│   │   ├── api/             # Groq LLM + Whisper STT clients
+│   │   ├── api/             # LLM + Whisper STT clients
 │   │   ├── audio/           # Capture, VAD, chunking, encoding
 │   │   ├── capture/         # Screenshot capture (multi-DE)
 │   │   ├── state/           # AppState, Settings, persistence
@@ -93,7 +93,6 @@ Shaya/
 ├── scripts/
 │   ├── run, debug, logs        # Runtime scripts
 │   ├── docker, lint, fmt       # Build/quality scripts
-│   ├── build-layer-shell       # GTK4 layer-shell from source
 │   ├── test-stealth            # Stealth mode verification
 │   └── README.md
 └── docs/
