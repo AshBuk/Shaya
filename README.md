@@ -28,6 +28,8 @@ One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 | **Privacy** | BYOK (bring your own key) — no cloud, no servers, data never leaves your machine |
 | **Stealth Mode** | Wayland overlay, hidden as much as possible |
 
+Bring your own API key — Anthropic, OpenAI, or Groq. LLM supports all three providers; STT supports Groq and OpenAI. Groq is especially recommended for STT and fast responses.
+
 ---
 
 ## Why Shaya Was Built
@@ -79,7 +81,7 @@ cargo build --release
 | Language | Rust |
 | UI | GTK4 + libadwaita |
 | Stealth | gtk4-layer-shell (`zwlr-layer-shell-v1`) |
-| AI | Groq / OpenAI / Anthropic (LLM), Groq Whisper (STT) |
+| AI | Groq / OpenAI / Anthropic (LLM), Groq / OpenAI (STT) |
 | Audio | PipeWire / PulseAudio via `parecord` |
 | Screenshots | grim, spectacle, gnome-screenshot, XDG Portal |
 | HTTP | ureq (blocking, background threads) |
