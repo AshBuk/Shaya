@@ -6,8 +6,8 @@
 
 //! Settings View - API keys and configuration
 
-use crate::core::models::{models_for_provider, STT_MODELS};
-use crate::core::state::{AiProvider, AppState};
+use crate::core::models::{models_for_provider, stt_models_for_provider};
+use crate::core::state::{AiProvider, AppState, SttProvider};
 use adw::prelude::*;
 use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow, StringList};
 use libadwaita as adw;
@@ -46,6 +46,19 @@ fn rebuild_model_list(model_row: &adw::ComboRow, provider: AiProvider, current_m
         .collect();
     let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     model_row.set_model(Some(&StringList::new(&refs)));
+
+    let idx = models
+        .iter()
+        .position(|m| m.id == current_model)
+        .unwrap_or(0);
+    model_row.set_selected(idx as u32);
+}
+
+/// Rebuild STT model combo row items for the given provider
+fn rebuild_stt_model_list(model_row: &adw::ComboRow, provider: SttProvider, current_model: &str) {
+    let models = stt_models_for_provider(provider);
+    let names: Vec<&str> = models.iter().map(|m| m.display_name).collect();
+    model_row.set_model(Some(&StringList::new(&names)));
 
     let idx = models
         .iter()
@@ -157,17 +170,38 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     // STT Provider group
     let stt_group = adw::PreferencesGroup::new();
     stt_group.set_title("Speech-to-Text");
-    stt_group.set_description(Some("Configure STT for audio transcription (Groq Whisper)"));
+
+    let stt_updating = Rc::new(Cell::new(false));
+
+    // STT Provider selector
+    let stt_provider_row = adw::ComboRow::new();
+    stt_provider_row.set_title("STT Provider");
+    let stt_provider_names: Vec<&str> = SttProvider::ALL.iter().map(|p| p.display_name()).collect();
+    stt_provider_row.set_model(Some(&StringList::new(&stt_provider_names)));
+    let current_stt_provider = state.borrow().settings.stt_provider;
+    let stt_provider_idx = SttProvider::ALL
+        .iter()
+        .position(|&p| p == current_stt_provider)
+        .unwrap_or(0);
+    stt_provider_row.set_selected(stt_provider_idx as u32);
+    stt_group.add(&stt_provider_row);
 
     // STT API Key
     let stt_key_row = adw::PasswordEntryRow::new();
     stt_key_row.set_title("STT API Key");
-    stt_key_row.set_text(&state.borrow().settings.stt_api_key);
+    stt_key_row.set_text(state.borrow().settings.active_stt_key());
 
     let state_c = state.clone();
     let debounce = save_debounce.clone();
+    let stt_updating_c = stt_updating.clone();
     stt_key_row.connect_changed(move |row| {
-        state_c.borrow_mut().settings.stt_api_key = row.text().to_string();
+        if stt_updating_c.get() {
+            return;
+        }
+        state_c
+            .borrow_mut()
+            .settings
+            .set_active_stt_key(row.text().to_string());
         schedule_autosave(&debounce, &state_c);
     });
     stt_group.add(&stt_key_row);
@@ -175,28 +209,55 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     // STT Model
     let stt_model_row = adw::ComboRow::new();
     stt_model_row.set_title("STT Model");
-
-    let stt_names: Vec<&str> = STT_MODELS.iter().map(|m| m.display_name).collect();
-    stt_model_row.set_model(Some(&StringList::new(&stt_names)));
-
-    let current_stt = &state.borrow().settings.stt_model;
-    let stt_index = STT_MODELS
-        .iter()
-        .position(|m| m.id == current_stt)
-        .unwrap_or(0);
-    stt_model_row.set_selected(stt_index as u32);
+    rebuild_stt_model_list(
+        &stt_model_row,
+        current_stt_provider,
+        state.borrow().settings.active_stt_model(),
+    );
 
     let state_c = state.clone();
     let debounce = save_debounce.clone();
+    let stt_updating_c = stt_updating.clone();
     stt_model_row.connect_selected_notify(move |row| {
+        if stt_updating_c.get() {
+            return;
+        }
+        let provider = state_c.borrow().settings.stt_provider;
+        let models = stt_models_for_provider(provider);
         let idx = row.selected() as usize;
-        if let Some(m) = STT_MODELS.get(idx) {
-            state_c.borrow_mut().settings.stt_model = m.id.to_string();
+        if let Some(m) = models.get(idx) {
+            state_c
+                .borrow_mut()
+                .settings
+                .set_active_stt_model(m.id.to_string());
         }
         schedule_autosave(&debounce, &state_c);
     });
-
     stt_group.add(&stt_model_row);
+
+    // Wire STT provider selector
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    let stt_key_c = stt_key_row.clone();
+    let stt_model_c = stt_model_row.clone();
+    let stt_updating_c = stt_updating.clone();
+    stt_provider_row.connect_selected_notify(move |row| {
+        let idx = row.selected() as usize;
+        let provider = SttProvider::ALL.get(idx).copied().unwrap_or_default();
+
+        stt_updating_c.set(true);
+        state_c.borrow_mut().settings.stt_provider = provider;
+        stt_key_c.set_text(state_c.borrow().settings.active_stt_key());
+        rebuild_stt_model_list(
+            &stt_model_c,
+            provider,
+            state_c.borrow().settings.active_stt_model(),
+        );
+        stt_updating_c.set(false);
+
+        schedule_autosave(&debounce, &state_c);
+    });
+
     page.add(&stt_group);
 
     // Appearance group
