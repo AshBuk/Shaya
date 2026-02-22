@@ -7,7 +7,7 @@ html<div align="center">
 
 </div>
 
-Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, and screenshots, and meeting recording & analysis. 
+Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. 
 
 Invisible to screen sharing on Wayland (as much as possible).
 
@@ -17,7 +17,7 @@ One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 
 | | |
 |---|---|
-| **AI Chat** | Conversation with context, markdown rendering, system prompts |
+| **AI Chat** | Groq, OpenAI, Anthropic — conversation with context, markdown rendering, system prompts |
 | **Voice Capture** | Record microphone or system audio, automatic transcription |
 | **Screenshots** | Full screen or area selection, auto-attached to chat as context |
 | **Meeting Recorder** | Capture mic + system audio, transcribe, get AI analysis |
@@ -26,7 +26,7 @@ One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 | **Appearance** | Adjustable opacity, light/dark theme |
 | **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |
 | **Privacy** | BYOK (bring your own key) — no cloud, no servers, data never leaves your machine |
-| **Stealth Mode** | Wayland overlay, hidden as much as possible — see [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor support |
+| **Stealth Mode** | Wayland overlay, hidden as much as possible |
 
 ---
 
@@ -79,7 +79,7 @@ cargo build --release
 | Language | Rust |
 | UI | GTK4 + libadwaita |
 | Stealth | gtk4-layer-shell (`zwlr-layer-shell-v1`) |
-| AI | Groq API (LLM + Whisper STT) |
+| AI | Groq / OpenAI / Anthropic (LLM), Groq Whisper (STT) |
 | Audio | PipeWire / PulseAudio via `parecord` |
 | Screenshots | grim, spectacle, gnome-screenshot, XDG Portal |
 | HTTP | ureq (blocking, background threads) |
