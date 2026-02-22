@@ -4,9 +4,10 @@
 //
 // https://github.com/AshBuk/Shaya
 
-//! Whisper STT API client (Groq)
+//! Whisper STT API client (Groq, OpenAI)
 
 use super::ErrorResponse;
+use crate::core::state::SttProvider;
 use anyhow::Result;
 use serde::Deserialize;
 use std::fs;
@@ -14,9 +15,11 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const GROQ_WHISPER_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
+const OPENAI_WHISPER_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 
 /// Whisper STT client
 pub struct WhisperClient {
+    provider: SttProvider,
     api_key: String,
     model: String,
 }
@@ -28,8 +31,9 @@ struct TranscriptionResponse {
 
 impl WhisperClient {
     /// Create a new Whisper client
-    pub fn new(api_key: &str, model: &str) -> Self {
+    pub fn new(provider: SttProvider, api_key: &str, model: &str) -> Self {
         Self {
+            provider,
             api_key: api_key.to_string(),
             model: model.to_string(),
         }
@@ -76,7 +80,7 @@ impl WhisperClient {
         body.extend_from_slice(self.model.as_bytes());
         body.extend_from_slice(b"\r\n");
 
-        // Add language field (optional, auto-detect)
+        // Add response format field
         body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
         body.extend_from_slice(b"Content-Disposition: form-data; name=\"response_format\"\r\n\r\n");
         body.extend_from_slice(b"json");
@@ -85,7 +89,12 @@ impl WhisperClient {
         // End boundary
         body.extend_from_slice(format!("--{}--\r\n", boundary).as_bytes());
 
-        let response = ureq::post(GROQ_WHISPER_URL)
+        let url = match self.provider {
+            SttProvider::Groq => GROQ_WHISPER_URL,
+            SttProvider::OpenAI => OPENAI_WHISPER_URL,
+        };
+
+        let response = ureq::post(url)
             .set("Authorization", &format!("Bearer {}", self.api_key))
             .set(
                 "Content-Type",
