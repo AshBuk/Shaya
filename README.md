@@ -1,15 +1,17 @@
-<div align="center">
+html<div align="center">
 <img src="icons/shaya.svg" width="180" height="180" alt="Shaya"/>
-<h1>Shaya</h1>
+
+# Shaya
+
+**AI assistant tool for Linux.**
+
 </div>
 
-**Native AI assistant tool for Linux.**
+Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, and screenshots, and meeting recording & analysis. 
 
-Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, and screenshots — invisible (as much as possible) to screen sharing on Wayland — only you know it's there.
+Invisible to screen sharing on Wayland (as much as possible).
 
 One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
-
----
 
 ## Features
 
@@ -23,7 +25,8 @@ One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 | **Conversation History** | Browse, continue, or delete past sessions |
 | **Appearance** | Adjustable opacity, light/dark theme |
 | **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |
-| **Stealth Mode** | Invisible overlay on Wayland — hidden from Zoom, Meet, OBS |
+| **Privacy** | BYOK (bring your own key) — no cloud, no servers, data never leaves your machine |
+| **Stealth Mode** | Wayland overlay, hidden as much as possible — see [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor support |
 
 ---
 
