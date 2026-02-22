@@ -7,7 +7,8 @@
 //! Application state with persistence
 
 use crate::core::models::{
-    DEFAULT_ANTHROPIC_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_STT_MODEL,
+    DEFAULT_ANTHROPIC_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_GROQ_STT_MODEL, DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENAI_STT_MODEL,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,26 @@ impl AiProvider {
     }
 }
 
+/// STT provider selection
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SttProvider {
+    #[default]
+    Groq,
+    OpenAI,
+}
+
+impl SttProvider {
+    pub const ALL: [SttProvider; 2] = [Self::Groq, Self::OpenAI];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Groq => "Groq",
+            Self::OpenAI => "OpenAI",
+        }
+    }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -47,8 +68,11 @@ pub struct Settings {
     pub openai_model: String,
     pub anthropic_api_key: String,
     pub anthropic_model: String,
-    pub stt_api_key: String,
-    pub stt_model: String,
+    pub stt_provider: SttProvider,
+    pub groq_stt_api_key: String,
+    pub groq_stt_model: String,
+    pub openai_stt_api_key: String,
+    pub openai_stt_model: String,
     pub dark_mode: bool,
     #[serde(default = "default_opacity")]
     pub window_opacity: f64,
@@ -101,6 +125,38 @@ impl Settings {
             AiProvider::Anthropic => self.anthropic_model = model,
         }
     }
+
+    /// Get API key for the active STT provider
+    pub fn active_stt_key(&self) -> &str {
+        match self.stt_provider {
+            SttProvider::Groq => &self.groq_stt_api_key,
+            SttProvider::OpenAI => &self.openai_stt_api_key,
+        }
+    }
+
+    /// Get model for the active STT provider
+    pub fn active_stt_model(&self) -> &str {
+        match self.stt_provider {
+            SttProvider::Groq => &self.groq_stt_model,
+            SttProvider::OpenAI => &self.openai_stt_model,
+        }
+    }
+
+    /// Set API key for the active STT provider
+    pub fn set_active_stt_key(&mut self, key: String) {
+        match self.stt_provider {
+            SttProvider::Groq => self.groq_stt_api_key = key,
+            SttProvider::OpenAI => self.openai_stt_api_key = key,
+        }
+    }
+
+    /// Set model for the active STT provider
+    pub fn set_active_stt_model(&mut self, model: String) {
+        match self.stt_provider {
+            SttProvider::Groq => self.groq_stt_model = model,
+            SttProvider::OpenAI => self.openai_stt_model = model,
+        }
+    }
 }
 
 fn default_opacity() -> f64 {
@@ -129,8 +185,11 @@ impl Default for Settings {
             openai_model: DEFAULT_OPENAI_MODEL.to_string(),
             anthropic_api_key: String::new(),
             anthropic_model: DEFAULT_ANTHROPIC_MODEL.to_string(),
-            stt_api_key: String::new(),
-            stt_model: DEFAULT_STT_MODEL.to_string(),
+            stt_provider: SttProvider::default(),
+            groq_stt_api_key: String::new(),
+            groq_stt_model: DEFAULT_GROQ_STT_MODEL.to_string(),
+            openai_stt_api_key: String::new(),
+            openai_stt_model: DEFAULT_OPENAI_STT_MODEL.to_string(),
             dark_mode: true,
             window_opacity: 1.0,
             meeting_record_mic: false,

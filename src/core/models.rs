@@ -6,7 +6,7 @@
 
 //! AI model constants
 
-use crate::core::state::AiProvider;
+use crate::core::state::{AiProvider, SttProvider};
 
 pub struct ModelInfo {
     pub id: &'static str,
@@ -123,11 +123,11 @@ pub const ANTHROPIC_MODELS: &[ModelInfo] = &[
     },
 ];
 
-// --- STT (Groq-only for now) ---
+// --- STT: Groq ---
 
-pub const DEFAULT_STT_MODEL: &str = "whisper-large-v3-turbo";
+pub const DEFAULT_GROQ_STT_MODEL: &str = "whisper-large-v3-turbo";
 
-pub const STT_MODELS: &[SttModelInfo] = &[
+pub const GROQ_STT_MODELS: &[SttModelInfo] = &[
     SttModelInfo {
         id: "whisper-large-v3-turbo",
         display_name: "Whisper Large V3 Turbo",
@@ -135,6 +135,25 @@ pub const STT_MODELS: &[SttModelInfo] = &[
     SttModelInfo {
         id: "whisper-large-v3",
         display_name: "Whisper Large V3",
+    },
+];
+
+// --- STT: OpenAI ---
+
+pub const DEFAULT_OPENAI_STT_MODEL: &str = "gpt-4o-transcribe";
+
+pub const OPENAI_STT_MODELS: &[SttModelInfo] = &[
+    SttModelInfo {
+        id: "gpt-4o-transcribe",
+        display_name: "GPT-4o Transcribe",
+    },
+    SttModelInfo {
+        id: "gpt-4o-mini-transcribe",
+        display_name: "GPT-4o Mini Transcribe",
+    },
+    SttModelInfo {
+        id: "whisper-1",
+        display_name: "Whisper-1",
     },
 ];
 
@@ -146,6 +165,14 @@ pub fn models_for_provider(provider: AiProvider) -> &'static [ModelInfo] {
         AiProvider::Groq => GROQ_MODELS,
         AiProvider::OpenAI => OPENAI_MODELS,
         AiProvider::Anthropic => ANTHROPIC_MODELS,
+    }
+}
+
+/// Get STT model list for a given provider
+pub fn stt_models_for_provider(provider: SttProvider) -> &'static [SttModelInfo] {
+    match provider {
+        SttProvider::Groq => GROQ_STT_MODELS,
+        SttProvider::OpenAI => OPENAI_STT_MODELS,
     }
 }
 
