@@ -14,7 +14,7 @@ use crate::core::state::{AppState, Message, Role};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Button, Entry, Label, ScrolledWindow, TextView};
+use gtk4::{Button, Entry, Label, TextView};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -219,30 +219,35 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
         return;
     }
 
-    // Format messages with role prefixes
-    let text: String = state
-        .current_messages
-        .iter()
-        .map(|m| {
-            let prefix = if m.role == Role::User {
-                "👤 You"
-            } else {
-                "🤖 AI"
-            };
-            format!("**{}:**\n{}", prefix, m.content)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    // Render messages one by one, tracking the last AI message offset
+    buffer.set_text("");
+    let mut last_ai_offset: i32 = 0;
 
-    // Render with markdown formatting
-    markdown::render(&buffer, &text);
+    for (idx, m) in state.current_messages.iter().enumerate() {
+        let prefix = if m.role == Role::User {
+            "👤 You"
+        } else {
+            "🤖 AI"
+        };
+        let block = format!("**{}:**\n{}", prefix, m.content);
 
-    // Scroll to bottom
-    if let Some(adj) = chat_view
-        .parent()
-        .and_then(|p| p.downcast::<ScrolledWindow>().ok())
-        .map(|sw| sw.vadjustment())
-    {
-        adj.set_value(adj.upper());
+        if idx > 0 {
+            let mut end = buffer.end_iter();
+            buffer.insert(&mut end, "\n\n");
+        }
+
+        let offset = markdown::render_append(&buffer, &block);
+        if m.role == Role::Assistant {
+            last_ai_offset = offset;
+        }
     }
+
+    // Scroll to the start of the last AI response
+    let scroll_offset = last_ai_offset;
+    let chat_view_clone = chat_view.clone();
+    glib::idle_add_local_once(move || {
+        let buffer = chat_view_clone.buffer();
+        let iter = buffer.iter_at_offset(scroll_offset);
+        chat_view_clone.scroll_to_iter(&mut iter.clone(), 0.0, true, 0.0, 0.0);
+    });
 }
