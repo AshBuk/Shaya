@@ -22,6 +22,7 @@ One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
 | **Screenshots** | Full screen or area selection, auto-attached to chat as context |
 | **Meeting Recorder** | Capture mic + system audio, transcribe, get AI analysis |
 | **Prompt Library** | Manage and switch system prompts for different scenarios |
+| **Cheatsheets** | Quick-access markdown notes with live preview |
 | **Conversation History** | Browse, continue, or delete past sessions |
 | **Appearance** | Adjustable opacity, light/dark theme |
 | **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |

@@ -29,8 +29,9 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 │   │   │  ViewStack with tabs:                       │   │   │
 │   │   │  - Chat View (AI interaction)               │   │   │
 │   │   │  - Settings View (API keys, models)         │   │   │
-│   │   │  - History View (conversations)             │   │   │
 │   │   │  - Prompts View (system prompts)            │   │   │
+│   │   │  - History View (conversations)             │   │   │
+│   │   │  - Cheatsheets View (markdown notes)        │   │   │
 │   │   │  - Meetings View (recordings, transcript)   │   │   │
 │   │   └─────────────────────────────────────────────┘   │   │
 │   │                                                     │   │
@@ -80,9 +81,10 @@ Shaya/
 │       └── views/
 │           ├── chat/        # Chat UI, messaging, audio, markdown
 │           ├── settings.rs  # API keys, model selection, theme
-│           ├── history.rs   # Past conversations
-│           ├── prompts.rs   # System prompts editor
-│           └── meetings.rs  # Meeting recording and transcription
+│           ├── history.rs      # Past conversations
+│           ├── prompts.rs      # System prompts editor
+│           ├── cheatsheets.rs  # Quick-access markdown notes
+│           └── meetings.rs     # Meeting recording and transcription
 ├── assets/
 │   └── shaya.desktop     # Desktop entry
 ├── docker/
@@ -109,7 +111,7 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 ### UI Structure
 ```
 ┌──────────────────────────────────────────┐
-│  🤫 Shaya  [Chat][⚙️][📜][📝][⏺]       │  ← Tab switcher
+│  🤫 Shaya  [Chat][⚙️][📝][📜][📋][⏺]   │  ← Tab switcher
 ├──────────────────────────────────────────┤
 │                                          │
 │           Active View Content            │  ← ViewStack
@@ -120,9 +122,10 @@ Single window containing ALL functionality — invisible to wlr-screencopy tools
 ### Views
 1. **Chat** — AI interaction, voice input, screenshots
 2. **Settings** — API keys, model selection, theme, opacity
-3. **History** — Past conversations (browse, continue, delete)
-4. **Prompts** — System prompts editor (multiple active)
-5. **Meetings** — Record, transcribe, AI analysis
+3. **Prompts** — System prompts editor (multiple active)
+4. **History** — Past conversations (browse, continue, delete)
+5. **Cheatsheets** — Quick-access markdown notes with live preview
+6. **Meetings** — Record, transcribe, AI analysis
 
 ---
 
@@ -135,6 +138,7 @@ pub struct AppState {
     pub history: Vec<Conversation>,
     pub prompts: Vec<SystemPrompt>,
     pub active_prompt_ids: Vec<String>,
+    pub cheatsheets: Vec<Cheatsheet>,
     pub current_messages: Vec<Message>,
 }
 
