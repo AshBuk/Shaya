@@ -154,6 +154,13 @@ fn build_view_stack(
         .page(&settings)
         .set_icon_name(Some("emblem-system-symbolic"));
 
+    // Prompts view
+    let prompts = views::prompts::build(state.clone());
+    stack.add_titled(&prompts, Some("prompts"), "Prompts");
+    stack
+        .page(&prompts)
+        .set_icon_name(Some("accessories-text-editor-symbolic"));
+
     // History view (needs stack reference and chat_view for refresh)
     let history = views::history::build(state.clone(), &stack, &chat_shared.chat_view);
     stack.add_titled(&history, Some("history"), "History");
@@ -161,12 +168,12 @@ fn build_view_stack(
         .page(&history)
         .set_icon_name(Some("document-open-recent-symbolic"));
 
-    // Prompts view
-    let prompts = views::prompts::build(state.clone());
-    stack.add_titled(&prompts, Some("prompts"), "Prompts");
+    // Cheatsheets view
+    let cheatsheets = views::cheatsheets::build(state.clone());
+    stack.add_titled(&cheatsheets, Some("cheatsheets"), "Cheatsheets");
     stack
-        .page(&prompts)
-        .set_icon_name(Some("accessories-text-editor-symbolic"));
+        .page(&cheatsheets)
+        .set_icon_name(Some("text-x-generic-symbolic"));
 
     // Meetings view
     let meetings = views::meetings::build(state.clone(), &stack);

@@ -66,7 +66,7 @@ pub fn build(
     header
 }
 
-/// Build navigation buttons (💬 ⚙️ 📝 📜 ⏺)
+/// Build navigation buttons (💬 ⚙️ 📝 📜 📋 ⏺)
 fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     let nav = GtkBox::new(Orientation::Horizontal, 2);
     nav.add_css_class("linked");
@@ -86,6 +86,10 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     let history_btn = ToggleButton::with_label("📜");
     history_btn.set_tooltip_text(Some("History"));
     history_btn.set_group(Some(&chat_btn));
+
+    let cheatsheets_btn = ToggleButton::with_label("📋");
+    cheatsheets_btn.set_tooltip_text(Some("Cheatsheets"));
+    cheatsheets_btn.set_group(Some(&chat_btn));
 
     let meetings_btn = ToggleButton::with_label("⏺");
     meetings_btn.set_tooltip_text(Some("Meetings"));
@@ -121,6 +125,13 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     });
 
     let stack_c = stack.clone();
+    cheatsheets_btn.connect_toggled(move |btn| {
+        if btn.is_active() {
+            stack_c.set_visible_child_name("cheatsheets");
+        }
+    });
+
+    let stack_c = stack.clone();
     meetings_btn.connect_toggled(move |btn| {
         if btn.is_active() {
             stack_c.set_visible_child_name("meetings");
@@ -131,6 +142,7 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     nav.append(&settings_btn);
     nav.append(&prompts_btn);
     nav.append(&history_btn);
+    nav.append(&cheatsheets_btn);
     nav.append(&meetings_btn);
 
     nav

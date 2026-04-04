@@ -7,6 +7,7 @@
 //! UI Views for the unified stealth window
 
 pub mod chat;
+pub mod cheatsheets;
 pub mod history;
 pub mod meetings;
 pub mod prompts;

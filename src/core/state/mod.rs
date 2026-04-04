@@ -234,6 +234,14 @@ pub struct SystemPrompt {
     pub content: String,
 }
 
+/// Cheatsheet note (markdown-rendered)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Cheatsheet {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+}
+
 impl Default for SystemPrompt {
     fn default() -> Self {
         Self {
@@ -252,6 +260,8 @@ pub struct AppState {
     pub prompts: Vec<SystemPrompt>,
     /// Active prompt IDs (multiple prompts combined for AI)
     pub active_prompt_ids: Vec<String>,
+    #[serde(default)]
+    pub cheatsheets: Vec<Cheatsheet>,
     #[serde(skip)]
     pub current_messages: Vec<Message>,
 }
@@ -263,6 +273,7 @@ impl Default for AppState {
             history: Vec::new(),
             prompts: vec![SystemPrompt::default()],
             active_prompt_ids: vec!["default".to_string()],
+            cheatsheets: Vec::new(),
             current_messages: Vec::new(),
         }
     }
@@ -355,5 +366,21 @@ impl AppState {
             return true;
         }
         false
+    }
+
+    /// Add new cheatsheet, returns its ID
+    pub fn add_cheatsheet(&mut self, name: String, content: String) -> String {
+        let id = format!("cheat-{}", chrono::Utc::now().timestamp_millis());
+        self.cheatsheets.push(Cheatsheet {
+            id: id.clone(),
+            name,
+            content,
+        });
+        id
+    }
+
+    /// Remove cheatsheet by ID
+    pub fn remove_cheatsheet(&mut self, id: &str) {
+        self.cheatsheets.retain(|c| c.id != id);
     }
 }
