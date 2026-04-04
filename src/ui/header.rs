@@ -164,56 +164,44 @@ fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
 
 /// Setup drag gesture for window movement (layer-shell)
 fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow, state: Rc<RefCell<AppState>>) {
-    let start_pos: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     let window_pos: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
 
     let drag = GestureDrag::new();
 
-    // Drag begin
+    // Drag begin: capture current margins
     let window_c = window.clone();
-    let start_pos_c = start_pos.clone();
     let window_pos_c = window_pos.clone();
-    drag.connect_drag_begin(move |_, x, y| {
-        start_pos_c.set(Some((x, y)));
+    drag.connect_drag_begin(move |_, _, _| {
+        #[cfg(target_os = "linux")]
+        {
+            use gtk4_layer_shell::{Edge, LayerShell};
+            if window_c.is_layer_window() {
+                window_pos_c.set((window_c.margin(Edge::Left), window_c.margin(Edge::Top)));
+            }
+        }
+    });
+
+    // Drag update: apply offset to start margins
+    let window_c = window.clone();
+    let window_pos_c = window_pos.clone();
+    drag.connect_drag_update(move |_, offset_x, offset_y| {
+        let (start_x, start_y) = window_pos_c.get();
+        let new_x = start_x + offset_x as i32;
+        let new_y = start_y + offset_y as i32;
 
         #[cfg(target_os = "linux")]
         {
             use gtk4_layer_shell::{Edge, LayerShell};
             if window_c.is_layer_window() {
-                let margin_left = window_c.margin(Edge::Left);
-                let margin_top = window_c.margin(Edge::Top);
-                window_pos_c.set((margin_left, margin_top));
-            }
-        }
-    });
-
-    // Drag update
-    let window_c = window.clone();
-    let start_pos_c = start_pos.clone();
-    let window_pos_c = window_pos.clone();
-    drag.connect_drag_update(move |_, offset_x, offset_y| {
-        if start_pos_c.get().is_some() {
-            let (start_x, start_y) = window_pos_c.get();
-            let new_x = start_x + offset_x as i32;
-            let new_y = start_y + offset_y as i32;
-
-            #[cfg(target_os = "linux")]
-            {
-                use gtk4_layer_shell::{Edge, LayerShell};
-                if window_c.is_layer_window() {
-                    window_c.set_margin(Edge::Left, new_x);
-                    window_c.set_margin(Edge::Top, new_y);
-                }
+                window_c.set_margin(Edge::Left, new_x);
+                window_c.set_margin(Edge::Top, new_y);
             }
         }
     });
 
     // Drag end: save position to state
     let window_c = window.clone();
-    let start_pos_c = start_pos.clone();
     drag.connect_drag_end(move |_, _, _| {
-        start_pos_c.set(None);
-
         #[cfg(target_os = "linux")]
         {
             use gtk4_layer_shell::{Edge, LayerShell};
