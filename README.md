@@ -7,11 +7,11 @@ html<div align="center">
 
 </div>
 
-Your fast and quiet tool during deep work, meetings, interviews etc. Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. 
+Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. A fast and quiet tool during deep work. 
 
 Invisible to screen sharing on Wayland (as much as possible).
 
-One Rust binary. Pure GTK4. No Electron. No web views. No compromises.
+One Rust binary. Pure GTK4. No compromises.
 
 ## Features
 
