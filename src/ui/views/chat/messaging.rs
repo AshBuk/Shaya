@@ -129,7 +129,8 @@ pub fn handle_screenshot_click(
 /// Send message to AI
 pub fn send_message(ctx: &ChatContext) {
     let text = ctx.entry.text();
-    if text.is_empty() {
+    let has_attachment = ctx.image.borrow().is_some();
+    if text.is_empty() && !has_attachment {
         return;
     }
 
@@ -154,10 +155,10 @@ pub fn send_message(ctx: &ChatContext) {
 
     // Add user message
     let has_image = attached.is_some();
-    let user_content = if has_image {
-        format!("{} [📷 Screenshot attached]", text)
-    } else {
-        text.to_string()
+    let user_content = match (text.is_empty(), has_image) {
+        (true, true) => "📷 Screenshot".to_string(),
+        (false, true) => format!("{} [📷 Screenshot attached]", text),
+        _ => text.to_string(),
     };
 
     ctx.state.borrow_mut().current_messages.push(Message {

@@ -65,7 +65,7 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     let chat_view = TextView::with_buffer(&buffer);
     chat_view.set_editable(false);
     chat_view.set_cursor_visible(false);
-    chat_view.set_wrap_mode(WrapMode::Word);
+    chat_view.set_wrap_mode(WrapMode::WordChar);
     chat_view.set_vexpand(true);
     chat_view.set_top_margin(8);
     chat_view.set_bottom_margin(8);
