@@ -33,11 +33,6 @@ pub const GROQ_MODELS: &[ModelInfo] = &[
         supports_vision: true,
     },
     ModelInfo {
-        id: "meta-llama/llama-4-maverick-17b-128e-instruct",
-        display_name: "Llama 4 Maverick 17B",
-        supports_vision: true,
-    },
-    ModelInfo {
         id: "llama-3.3-70b-versatile",
         display_name: "Llama 3.3 70B",
         supports_vision: false,
