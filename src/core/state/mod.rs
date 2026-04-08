@@ -210,11 +210,21 @@ pub enum Role {
     System,
 }
 
+/// Image data for Vision API (base64-encoded)
+#[derive(Debug, Clone)]
+pub struct ImageData {
+    pub base64_data: String,
+    pub mime_type: String,
+}
+
 /// Chat message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
+    /// Attached image — kept in-memory for current session, not persisted to disk
+    #[serde(skip)]
+    pub image: Option<ImageData>,
 }
 
 /// Conversation history entry

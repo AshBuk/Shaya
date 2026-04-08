@@ -7,10 +7,9 @@
 //! Messaging handlers - chat messages and screenshots
 
 use super::markdown;
-use crate::core::api::llm::ImageData;
 use crate::core::api::LlmClient;
 use crate::core::capture;
-use crate::core::state::{AppState, Message, Role};
+use crate::core::state::{AppState, ImageData, Message, Role};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -153,7 +152,7 @@ pub fn send_message(ctx: &ChatContext) {
     let attached = ctx.image.borrow_mut().take();
     ctx.attach_label.set_visible(false);
 
-    // Add user message
+    // Add user message with image stored inline
     let has_image = attached.is_some();
     let user_content = match (text.is_empty(), has_image) {
         (true, true) => "📷 Screenshot".to_string(),
@@ -164,6 +163,7 @@ pub fn send_message(ctx: &ChatContext) {
     ctx.state.borrow_mut().current_messages.push(Message {
         role: Role::User,
         content: user_content,
+        image: attached,
     });
 
     update_chat_display(&ctx.chat_view, &ctx.state.borrow());
@@ -180,7 +180,7 @@ pub fn send_message(ctx: &ChatContext) {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::new(provider, &api_key, &model);
             client
-                .chat_with_image(&messages, &system_prompt, attached.as_ref())
+                .chat(&messages, &system_prompt)
                 .map_err(|e| e.to_string())
         })
         .await;
@@ -190,6 +190,7 @@ pub fn send_message(ctx: &ChatContext) {
                 ctx_c.state.borrow_mut().current_messages.push(Message {
                     role: Role::Assistant,
                     content: response,
+                    image: None,
                 });
                 update_chat_display(&ctx_c.chat_view, &ctx_c.state.borrow());
                 ctx_c.status_label.set_visible(false);

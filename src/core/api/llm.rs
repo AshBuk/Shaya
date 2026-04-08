@@ -34,13 +34,6 @@ pub struct LlmClient {
     model: String,
 }
 
-/// Image data for Vision API
-#[derive(Clone)]
-pub struct ImageData {
-    pub base64_data: String,
-    pub mime_type: String,
-}
-
 // OpenAI-compatible response (Groq & OpenAI)
 #[derive(Deserialize)]
 struct ChatResponse {
@@ -78,21 +71,12 @@ impl LlmClient {
         }
     }
 
-    /// Send a chat completion request with optional image (Vision API)
-    pub fn chat_with_image(
-        &self,
-        messages: &[Message],
-        system_prompt: &str,
-        image: Option<&ImageData>,
-    ) -> Result<String> {
+    /// Send a chat completion request (images are read from each Message)
+    pub fn chat(&self, messages: &[Message], system_prompt: &str) -> Result<String> {
         match self.provider {
-            AiProvider::Groq => {
-                self.openai_compatible(GROQ_API_URL, messages, system_prompt, image)
-            }
-            AiProvider::OpenAI => {
-                self.openai_compatible(OPENAI_API_URL, messages, system_prompt, image)
-            }
-            AiProvider::Anthropic => self.anthropic(messages, system_prompt, image),
+            AiProvider::Groq => self.openai_compatible(GROQ_API_URL, messages, system_prompt),
+            AiProvider::OpenAI => self.openai_compatible(OPENAI_API_URL, messages, system_prompt),
+            AiProvider::Anthropic => self.anthropic(messages, system_prompt),
         }
     }
 
@@ -102,54 +86,27 @@ impl LlmClient {
         url: &str,
         messages: &[Message],
         system_prompt: &str,
-        image: Option<&ImageData>,
     ) -> Result<String> {
-        let model = if image.is_some()
-            && self.provider == AiProvider::Groq
-            && !supports_vision(&self.model)
-        {
-            tracing::info!(
-                "Image attached but {} doesn't support Vision, falling back to {}",
-                self.model,
+        let has_images = messages.iter().any(|m| m.image.is_some());
+        let model =
+            if has_images && self.provider == AiProvider::Groq && !supports_vision(&self.model) {
+                tracing::info!(
+                    "Image attached but {} doesn't support Vision, falling back to {}",
+                    self.model,
+                    VISION_FALLBACK_MODEL
+                );
                 VISION_FALLBACK_MODEL
-            );
-            VISION_FALLBACK_MODEL
-        } else {
-            &self.model
-        };
+            } else {
+                &self.model
+            };
 
         let mut chat_messages = vec![json!({
             "role": "system",
             "content": system_prompt
         })];
 
-        for msg in messages.iter().take(messages.len().saturating_sub(1)) {
-            chat_messages.push(json!({
-                "role": msg.role,
-                "content": msg.content
-            }));
-        }
-
-        if let Some(last_msg) = messages.last() {
-            if let Some(img) = image {
-                chat_messages.push(json!({
-                    "role": last_msg.role,
-                    "content": [
-                        { "type": "text", "text": last_msg.content },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": format!("data:{};base64,{}", img.mime_type, img.base64_data)
-                            }
-                        }
-                    ]
-                }));
-            } else {
-                chat_messages.push(json!({
-                    "role": last_msg.role,
-                    "content": last_msg.content
-                }));
-            }
+        for msg in messages {
+            chat_messages.push(build_openai_message(msg));
         }
 
         let request = json!({
@@ -188,48 +145,12 @@ impl LlmClient {
     }
 
     /// Anthropic Messages API
-    fn anthropic(
-        &self,
-        messages: &[Message],
-        system_prompt: &str,
-        image: Option<&ImageData>,
-    ) -> Result<String> {
-        let mut chat_messages = Vec::new();
-
-        // Anthropic requires system prompt as a separate field, not in messages
-        for msg in messages.iter().take(messages.len().saturating_sub(1)) {
-            if msg.role == Role::System {
-                continue;
-            }
-            chat_messages.push(json!({
-                "role": msg.role,
-                "content": msg.content
-            }));
-        }
-
-        if let Some(last_msg) = messages.last() {
-            if let Some(img) = image {
-                chat_messages.push(json!({
-                    "role": last_msg.role,
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": img.mime_type,
-                                "data": img.base64_data
-                            }
-                        },
-                        { "type": "text", "text": last_msg.content }
-                    ]
-                }));
-            } else {
-                chat_messages.push(json!({
-                    "role": last_msg.role,
-                    "content": last_msg.content
-                }));
-            }
-        }
+    fn anthropic(&self, messages: &[Message], system_prompt: &str) -> Result<String> {
+        let chat_messages: Vec<_> = messages
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .map(build_anthropic_message)
+            .collect();
 
         let request = json!({
             "model": self.model,
@@ -265,5 +186,51 @@ impl LlmClient {
             }
             Err(e) => anyhow::bail!("Request failed: {}", e),
         }
+    }
+}
+
+/// Build OpenAI-format message JSON, embedding image as multimodal content if present
+fn build_openai_message(msg: &Message) -> serde_json::Value {
+    match &msg.image {
+        Some(img) => json!({
+            "role": msg.role,
+            "content": [
+                { "type": "text", "text": msg.content },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": format!("data:{};base64,{}", img.mime_type, img.base64_data)
+                    }
+                }
+            ]
+        }),
+        None => json!({
+            "role": msg.role,
+            "content": msg.content
+        }),
+    }
+}
+
+/// Build Anthropic-format message JSON, embedding image as multimodal content if present
+fn build_anthropic_message(msg: &Message) -> serde_json::Value {
+    match &msg.image {
+        Some(img) => json!({
+            "role": msg.role,
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img.mime_type,
+                        "data": img.base64_data
+                    }
+                },
+                { "type": "text", "text": msg.content }
+            ]
+        }),
+        None => json!({
+            "role": msg.role,
+            "content": msg.content
+        }),
     }
 }

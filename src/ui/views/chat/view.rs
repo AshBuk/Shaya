@@ -11,9 +11,8 @@
 //! - `build_input` - interactive controls (control panel)
 
 use super::{audio, markdown, messaging};
-use crate::core::api::llm::ImageData;
 use crate::core::audio::{AudioRecorder, ListenRecorder};
-use crate::core::state::{AppState, Conversation, Role};
+use crate::core::state::{AppState, Conversation, ImageData, Role};
 use chrono::Utc;
 use gtk4::prelude::*;
 use gtk4::{

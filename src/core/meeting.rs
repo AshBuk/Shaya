@@ -375,9 +375,10 @@ pub fn analyze_meeting(
     let messages = vec![Message {
         role: Role::User,
         content: format!("Analyze this meeting transcript:\n\n{}", transcript),
+        image: None,
     }];
 
-    let response = client.chat_with_image(&messages, system_prompt, None)?;
+    let response = client.chat(&messages, system_prompt)?;
 
     // Save analysis
     MeetingManager::save_analysis(meeting_id, &response)?;
