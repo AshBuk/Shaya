@@ -221,9 +221,9 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
         return;
     }
 
-    // Render messages one by one, tracking the last AI message offset
+    // Render messages one by one, tracking the last message offset
     buffer.set_text("");
-    let mut last_ai_offset: i32 = 0;
+    let mut last_offset: i32 = 0;
 
     for (idx, m) in state.current_messages.iter().enumerate() {
         let prefix = if m.role == Role::User {
@@ -238,14 +238,11 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
             buffer.insert(&mut end, "\n\n");
         }
 
-        let offset = markdown::render_append(&buffer, &block);
-        if m.role == Role::Assistant {
-            last_ai_offset = offset;
-        }
+        last_offset = markdown::render_append(&buffer, &block);
     }
 
-    // Scroll to the start of the last AI response
-    let scroll_offset = last_ai_offset;
+    // Scroll to the start of the last message
+    let scroll_offset = last_offset;
     let chat_view_clone = chat_view.clone();
     glib::idle_add_local_once(move || {
         let buffer = chat_view_clone.buffer();
