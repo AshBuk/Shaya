@@ -16,8 +16,8 @@ use crate::core::state::{AppState, Conversation, ImageData, Role};
 use chrono::Utc;
 use gtk4::prelude::*;
 use gtk4::{
-    ApplicationWindow, Box as GtkBox, Button, Entry, Label, Orientation, PolicyType,
-    ScrolledWindow, TextBuffer, TextView, WrapMode,
+    Box as GtkBox, Button, Entry, Label, Orientation, PolicyType, ScrolledWindow, TextBuffer,
+    TextView, WrapMode,
 };
 use libadwaita as adw;
 use std::cell::RefCell;
@@ -109,7 +109,6 @@ pub fn build_input(
     state: Rc<RefCell<AppState>>,
     _stack: &adw::ViewStack,
     shared: ChatSharedState,
-    window: &ApplicationWindow,
 ) -> GtkBox {
     let vbox = GtkBox::new(Orientation::Vertical, 4);
 
@@ -162,21 +161,10 @@ pub fn build_input(
     input_box.append(&send_btn);
     vbox.append(&input_box);
 
-    // Action buttons row with drag handle
+    // Action buttons row
     let buttons_box = GtkBox::new(Orientation::Horizontal, 4);
+    buttons_box.set_halign(gtk4::Align::Center);
     buttons_box.set_margin_top(4);
-
-    // ⋮⋮ Drag handle (left) for window movement
-    let drag_label = Label::new(Some("⋮⋮"));
-    drag_label.add_css_class("dim-label");
-    drag_label.set_tooltip_text(Some("Drag to move"));
-    let drag_box = GtkBox::new(Orientation::Horizontal, 0);
-    drag_box.set_cursor_from_name(Some("grab"));
-    drag_box.append(&drag_label);
-    drag_box.set_hexpand(true);
-    drag_box.set_halign(gtk4::Align::Start);
-    crate::ui::header::setup_drag_gesture(&drag_box, window, state.clone());
-    buttons_box.append(&drag_box);
 
     // 🎤 Record
     let audio_btn = Button::with_label("🎤");
@@ -313,12 +301,6 @@ pub fn build_input(
     buttons_box.append(&screenshot_btn);
     buttons_box.append(&save_btn);
     buttons_box.append(&clear_btn);
-
-    // Spacer (right) to keep buttons centered
-    let spacer = GtkBox::new(Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    buttons_box.append(&spacer);
-
     vbox.append(&buttons_box);
 
     vbox

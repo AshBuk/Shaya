@@ -119,14 +119,18 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     main_box.append(&content_box);
 
     // Control panel (chat input)
-    let control_panel = build_control_panel(&window, &stack, state.clone(), chat_shared);
+    let control_panel = build_control_panel(&stack, state.clone(), chat_shared);
     main_box.append(&control_panel);
 
-    // Wrap in overlay for resize handle
+    // Wrap in overlay for drag + resize handles
     let overlay = Overlay::new();
     overlay.set_child(Some(&main_box));
 
-    // Resize handle (bottom-right corner)
+    // Drag handle (bottom-left)
+    let drag_handle = build_drag_handle(&window, state.clone());
+    overlay.add_overlay(&drag_handle);
+
+    // Resize handle (bottom-right)
     let resize_handle = build_resize_handle(&window, state);
     overlay.add_overlay(&resize_handle);
 
@@ -187,7 +191,6 @@ fn build_view_stack(
 
 /// Build control panel (chat input area)
 fn build_control_panel(
-    window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
     chat_shared: views::chat::ChatSharedState,
@@ -199,7 +202,7 @@ fn build_control_panel(
     panel.set_margin_end(8);
     panel.add_css_class("control-panel");
 
-    let input_area = views::chat::build_input(state.clone(), stack, chat_shared, window);
+    let input_area = views::chat::build_input(state.clone(), stack, chat_shared);
     panel.append(&input_area);
 
     // Show only when chat view is active
@@ -211,13 +214,32 @@ fn build_control_panel(
     panel
 }
 
-/// ⤡ Build resize handle for bottom-right corner
+/// ⋮⋮ Build drag handle (bottom-left)
+fn build_drag_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
+    let drag_box = GtkBox::new(Orientation::Horizontal, 0);
+    drag_box.set_halign(gtk4::Align::Start);
+    drag_box.set_valign(gtk4::Align::End);
+    drag_box.set_margin_start(8);
+    drag_box.set_margin_bottom(8);
+    drag_box.set_cursor_from_name(Some("grab"));
+
+    let label = Label::new(Some("⋮⋮"));
+    label.add_css_class("dim-label");
+    label.set_tooltip_text(Some("Drag to move"));
+    drag_box.append(&label);
+
+    header::setup_drag_gesture(&drag_box, window, state);
+
+    drag_box
+}
+
+/// ⤡ Build resize (bottom-right)
 fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> Label {
     let handle = Label::new(Some("⤡"));
     handle.set_halign(gtk4::Align::End);
     handle.set_valign(gtk4::Align::End);
-    handle.set_margin_end(4);
-    handle.set_margin_bottom(4);
+    handle.set_margin_end(8);
+    handle.set_margin_bottom(8);
     handle.add_css_class("dim-label");
     handle.set_cursor_from_name(Some("se-resize"));
     handle.set_tooltip_text(Some("Drag to resize"));
