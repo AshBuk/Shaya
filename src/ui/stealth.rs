@@ -16,7 +16,7 @@ use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio::ApplicationFlags;
-use gtk4::{glib, ApplicationWindow, Box as GtkBox, GestureDrag, Label, Orientation, Overlay};
+use gtk4::{gdk, glib, ApplicationWindow, Box as GtkBox, GestureDrag, Label, Orientation, Overlay};
 use libadwaita as adw;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -248,27 +248,62 @@ fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>)
 
     let drag = GestureDrag::new();
 
-    // Drag begin: store current size
+    // Drag begin: store current size (layer-shell) or delegate to WM (fallback)
     let window_c = window.clone();
     let start_size_c = start_size.clone();
-    drag.connect_drag_begin(move |_, _, _| {
-        let (w, h) = (window_c.width(), window_c.height());
-        start_size_c.set((w, h));
+    drag.connect_drag_begin(move |gesture, x, y| {
+        #[cfg(target_os = "linux")]
+        {
+            use gtk4_layer_shell::LayerShell;
+            if window_c.is_layer_window() {
+                start_size_c.set((window_c.width(), window_c.height()));
+                return;
+            }
+        }
+        // Fallback: delegate resize to window manager (GNOME, etc.)
+        if let Some(surface) = window_c.surface() {
+            if let Some(toplevel) = surface.dynamic_cast_ref::<gdk::Toplevel>() {
+                if let Some(device) = gesture.device() {
+                    toplevel.begin_resize(
+                        gdk::SurfaceEdge::SouthEast,
+                        Some(&device),
+                        gesture.current_button() as i32,
+                        x,
+                        y,
+                        gesture.current_event_time(),
+                    );
+                }
+            }
+        }
     });
 
-    // Drag update: resize window
+    // Drag update: resize window (layer-shell only, WM handles fallback)
     let window_c = window.clone();
     let start_size_c = start_size.clone();
     drag.connect_drag_update(move |_, offset_x, offset_y| {
+        #[cfg(target_os = "linux")]
+        {
+            use gtk4_layer_shell::LayerShell;
+            if !window_c.is_layer_window() {
+                return;
+            }
+        }
         let (start_w, start_h) = start_size_c.get();
         let new_w = (start_w + offset_x as i32).max(300);
         let new_h = (start_h + offset_y as i32).max(250);
         window_c.set_default_size(new_w, new_h);
     });
 
-    // Drag end: save size to state
+    // Drag end: save size to state (layer-shell only, WM handles fallback)
     let window_c = window.clone();
     drag.connect_drag_end(move |_, _, _| {
+        #[cfg(target_os = "linux")]
+        {
+            use gtk4_layer_shell::LayerShell;
+            if !window_c.is_layer_window() {
+                return;
+            }
+        }
         let (w, h) = (window_c.width(), window_c.height());
         let mut st = state.borrow_mut();
         st.settings.window_width = w;
@@ -300,7 +335,7 @@ fn apply_appearance_settings(window: &ApplicationWindow, state: &Rc<RefCell<AppS
     }
 }
 
-/// Hide window (layer-shell and GNOME both use set_visible)
+/// Hide window (set_visible works on both layer-shell and GNOME)
 pub(crate) fn hide_window(window: &ApplicationWindow) {
     WINDOW_HIDDEN.with(|h| h.set(true));
     tracing::info!("Hiding window");

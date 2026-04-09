@@ -8,6 +8,7 @@
 
 use crate::core::state::AppState;
 use adw::prelude::*;
+use gtk4::gdk;
 use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, ToggleButton};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
@@ -175,27 +176,47 @@ pub fn setup_drag_gesture(
         }
     });
 
-    // Drag update: apply offset to start margins
+    // Drag update: apply offset (layer-shell) or delegate to WM on first update (fallback)
     let window_c = window.clone();
     let window_pos_c = window_pos.clone();
-    drag.connect_drag_update(move |_, offset_x, offset_y| {
-        let (start_x, start_y) = window_pos_c.get();
-        let new_x = start_x + offset_x as i32;
-        let new_y = start_y + offset_y as i32;
-
+    let wm_move_started = Rc::new(Cell::new(false));
+    let wm_move_started_c = wm_move_started.clone();
+    drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         #[cfg(target_os = "linux")]
         {
             use gtk4_layer_shell::{Edge, LayerShell};
             if window_c.is_layer_window() {
-                window_c.set_margin(Edge::Left, new_x);
-                window_c.set_margin(Edge::Top, new_y);
+                let (start_x, start_y) = window_pos_c.get();
+                window_c.set_margin(Edge::Left, start_x + offset_x as i32);
+                window_c.set_margin(Edge::Top, start_y + offset_y as i32);
+                return;
+            }
+        }
+        // Fallback: delegate to WM once (GNOME, etc.)
+        if !wm_move_started_c.get() {
+            wm_move_started_c.set(true);
+            if let Some(surface) = window_c.surface() {
+                if let Some(toplevel) = surface.dynamic_cast_ref::<gdk::Toplevel>() {
+                    if let Some(device) = gesture.device() {
+                        let (start_x, start_y) = gesture.start_point().unwrap_or((0.0, 0.0));
+                        toplevel.begin_move(
+                            &device,
+                            gesture.current_button() as i32,
+                            start_x + offset_x,
+                            start_y + offset_y,
+                            gesture.current_event_time(),
+                        );
+                    }
+                }
             }
         }
     });
 
-    // Drag end: save position to state
+    // Drag end: reset WM flag + save position (layer-shell)
+    let wm_move_started_c = wm_move_started;
     let window_c = window.clone();
     drag.connect_drag_end(move |_, _, _| {
+        wm_move_started_c.set(false);
         #[cfg(target_os = "linux")]
         {
             use gtk4_layer_shell::{Edge, LayerShell};
