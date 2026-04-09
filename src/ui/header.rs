@@ -8,9 +8,7 @@
 
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::{
-    ApplicationWindow, Box as GtkBox, EventControllerMotion, GestureDrag, Orientation, ToggleButton,
-};
+use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, ToggleButton};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -31,7 +29,7 @@ pub fn build(
     // Drag indicator (left)
     let drag_icon = gtk4::Label::new(Some("⋮⋮"));
     drag_icon.add_css_class("dim-label");
-    drag_icon.set_tooltip_text(Some("Drag to move window"));
+    drag_icon.set_tooltip_text(Some("Drag to move"));
     header.append(&drag_icon);
 
     // Spacer left
@@ -59,9 +57,6 @@ pub fn build(
 
     // Setup drag gesture for window movement
     setup_drag_gesture(&header, window, state);
-
-    // Setup hover feedback
-    setup_hover_feedback(&header);
 
     header
 }
@@ -151,7 +146,7 @@ fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
 /// Build hide button
 fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
     let hide_btn = gtk4::Button::with_label("—");
-    hide_btn.set_tooltip_text(Some("Hide window"));
+    hide_btn.set_tooltip_text(Some("Hide"));
     hide_btn.add_css_class("flat");
 
     let window_c = window.clone();
@@ -163,7 +158,11 @@ fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
 }
 
 /// Setup drag gesture for window movement (layer-shell)
-fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow, state: Rc<RefCell<AppState>>) {
+pub fn setup_drag_gesture(
+    widget: &GtkBox,
+    window: &ApplicationWindow,
+    state: Rc<RefCell<AppState>>,
+) {
     let window_pos: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
 
     let drag = GestureDrag::new();
@@ -218,22 +217,5 @@ fn setup_drag_gesture(header: &GtkBox, window: &ApplicationWindow, state: Rc<Ref
         }
     });
 
-    header.add_controller(drag);
-}
-
-/// Setup hover feedback on header
-fn setup_hover_feedback(header: &GtkBox) {
-    let motion = EventControllerMotion::new();
-
-    let header_c = header.clone();
-    motion.connect_enter(move |_, _, _| {
-        header_c.add_css_class("header-bar-hover");
-    });
-
-    let header_c = header.clone();
-    motion.connect_leave(move |_| {
-        header_c.remove_css_class("header-bar-hover");
-    });
-
-    header.add_controller(motion);
+    widget.add_controller(drag);
 }

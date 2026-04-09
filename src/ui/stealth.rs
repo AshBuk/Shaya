@@ -119,7 +119,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     main_box.append(&content_box);
 
     // Control panel (chat input)
-    let control_panel = build_control_panel(&stack, state.clone(), chat_shared);
+    let control_panel = build_control_panel(&window, &stack, state.clone(), chat_shared);
     main_box.append(&control_panel);
 
     // Wrap in overlay for resize handle
@@ -187,6 +187,7 @@ fn build_view_stack(
 
 /// Build control panel (chat input area)
 fn build_control_panel(
+    window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
     chat_shared: views::chat::ChatSharedState,
@@ -198,7 +199,7 @@ fn build_control_panel(
     panel.set_margin_end(8);
     panel.add_css_class("control-panel");
 
-    let input_area = views::chat::build_input(state, stack, chat_shared);
+    let input_area = views::chat::build_input(state.clone(), stack, chat_shared, window);
     panel.append(&input_area);
 
     // Show only when chat view is active
@@ -210,9 +211,9 @@ fn build_control_panel(
     panel
 }
 
-/// Build resize handle for bottom-right corner
+/// ⤡ Build resize handle for bottom-right corner
 fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> Label {
-    let handle = Label::new(Some("⋱"));
+    let handle = Label::new(Some("⤡"));
     handle.set_halign(gtk4::Align::End);
     handle.set_valign(gtk4::Align::End);
     handle.set_margin_end(4);
