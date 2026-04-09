@@ -50,11 +50,6 @@ pub fn build(
     let hide_btn = build_hide_button(window);
     header.append(&hide_btn);
 
-    // Drag indicator (right)
-    let drag_icon_r = gtk4::Label::new(Some("⋮⋮"));
-    drag_icon_r.add_css_class("dim-label");
-    header.append(&drag_icon_r);
-
     // Setup drag gesture for window movement
     setup_drag_gesture(&header, window, state);
 
