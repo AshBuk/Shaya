@@ -6,7 +6,6 @@ Usage: `./dev <command>`
 run      # Run Shaya binary
 debug    # Run with debug logging (background)
 logs     # View logs in real-time
-kill     # Stop running instances
 docker   # Docker build helper (interactive menu)
 lint     # cargo clippy
 fmt      # cargo fmt
