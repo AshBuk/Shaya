@@ -151,12 +151,12 @@ fn build_view_stack(
     stack.add_titled(&chat, Some("chat"), "Chat");
     stack.page(&chat).set_icon_name(Some("chat-symbolic"));
 
-    // Settings view (needs window reference for opacity control)
-    let settings = views::settings::build(window, state.clone());
-    stack.add_titled(&settings, Some("settings"), "Settings");
+    // Cheatsheets view
+    let cheatsheets = views::cheatsheets::build(state.clone());
+    stack.add_titled(&cheatsheets, Some("cheatsheets"), "Cheatsheets");
     stack
-        .page(&settings)
-        .set_icon_name(Some("emblem-system-symbolic"));
+        .page(&cheatsheets)
+        .set_icon_name(Some("text-x-generic-symbolic"));
 
     // Prompts view
     let prompts = views::prompts::build(state.clone());
@@ -172,12 +172,12 @@ fn build_view_stack(
         .page(&history)
         .set_icon_name(Some("document-open-recent-symbolic"));
 
-    // Cheatsheets view
-    let cheatsheets = views::cheatsheets::build(state.clone());
-    stack.add_titled(&cheatsheets, Some("cheatsheets"), "Cheatsheets");
+    // Settings view (needs window reference for opacity control)
+    let settings = views::settings::build(window, state.clone());
+    stack.add_titled(&settings, Some("settings"), "Settings");
     stack
-        .page(&cheatsheets)
-        .set_icon_name(Some("text-x-generic-symbolic"));
+        .page(&settings)
+        .set_icon_name(Some("emblem-system-symbolic"));
 
     // Meetings view
     let meetings = views::meetings::build(state.clone(), &stack);
