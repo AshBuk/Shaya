@@ -79,6 +79,12 @@ pub struct Settings {
     /// Whether to also record microphone during meetings
     #[serde(default)]
     pub meeting_record_mic: bool,
+    #[serde(default = "default_live_chunk_secs")]
+    pub live_chunk_secs: u64,
+    #[serde(default = "default_live_auto_suggest")]
+    pub live_auto_suggest: bool,
+    #[serde(default)]
+    pub live_debug_transcript: bool,
     #[serde(default = "default_window_x")]
     pub window_x: i32,
     #[serde(default = "default_window_y")]
@@ -162,6 +168,12 @@ impl Settings {
 fn default_opacity() -> f64 {
     1.0
 }
+fn default_live_chunk_secs() -> u64 {
+    4
+}
+fn default_live_auto_suggest() -> bool {
+    true
+}
 fn default_window_x() -> i32 {
     100
 }
@@ -193,6 +205,9 @@ impl Default for Settings {
             dark_mode: true,
             window_opacity: 1.0,
             meeting_record_mic: false,
+            live_chunk_secs: default_live_chunk_secs(),
+            live_auto_suggest: default_live_auto_suggest(),
+            live_debug_transcript: false,
             window_x: default_window_x(),
             window_y: default_window_y(),
             window_width: default_window_width(),

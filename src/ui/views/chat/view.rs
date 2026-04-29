@@ -10,7 +10,7 @@
 //! - `build_content` - read-only content (passthrough area)
 //! - `build_input` - interactive controls (control panel)
 
-use super::{audio, markdown, messaging};
+use super::{audio, live, markdown, messaging};
 use crate::core::audio::{AudioRecorder, ListenRecorder};
 use crate::core::state::{AppState, Conversation, ImageData, Role};
 use chrono::Utc;
@@ -28,6 +28,7 @@ use std::rc::Rc;
 pub(crate) struct ChatSharedState {
     pub(crate) chat_view: TextView,
     status_label: Label,
+    transcript_label: Label,
     attachment_label: Label,
     attached_image: Rc<RefCell<Option<ImageData>>>,
     recorder: Rc<RefCell<AudioRecorder>>,
@@ -49,6 +50,14 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     status_label.add_css_class("dim-label");
     status_label.set_visible(false);
     vbox.append(&status_label);
+
+    let transcript_label = Label::new(None);
+    transcript_label.set_halign(gtk4::Align::Start);
+    transcript_label.set_selectable(true);
+    transcript_label.set_wrap(true);
+    transcript_label.add_css_class("dim-label");
+    transcript_label.set_visible(false);
+    vbox.append(&transcript_label);
 
     // Attachment indicator
     let attachment_label = Label::new(None);
@@ -90,6 +99,7 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     let shared = ChatSharedState {
         chat_view,
         status_label,
+        transcript_label,
         attachment_label,
         attached_image: Rc::new(RefCell::new(None)),
         recorder: Rc::new(RefCell::new(AudioRecorder::new())),
@@ -114,6 +124,7 @@ pub fn build_input(
 
     let chat_view = shared.chat_view;
     let status_label = shared.status_label;
+    let transcript_label = shared.transcript_label;
     let attachment_label = shared.attachment_label;
     let attached_image = shared.attached_image;
     let recorder = shared.recorder;
@@ -193,6 +204,44 @@ pub fn build_input(
 
         listen_btn.connect_clicked(move |_| {
             audio::handle_listen_click(&listener_c, &state_c, &status_c, &listen_btn_c, &entry_c);
+        });
+    }
+
+    let live_btn = Button::with_label("📡");
+    live_btn.set_tooltip_text(Some("Start Live Assistant"));
+
+    let reply_btn = Button::with_label("🗣\u{fe0f}");
+    reply_btn.set_tooltip_text(Some("Answer latest live transcript now"));
+    reply_btn.set_sensitive(false);
+
+    let live_runtime = Rc::new(RefCell::new(live::LiveRuntime::default()));
+    let live_ctx = live::LiveContext {
+        state: state.clone(),
+        chat_view: chat_view.clone(),
+        status_label: status_label.clone(),
+        transcript_label: transcript_label.clone(),
+        attached_image: attached_image.clone(),
+        audio_btn: audio_btn.clone(),
+        listen_btn: listen_btn.clone(),
+        live_btn: live_btn.clone(),
+        reply_btn: reply_btn.clone(),
+        recorder: recorder.clone(),
+        listener: listener.clone(),
+    };
+
+    {
+        let ctx = live_ctx.clone();
+        let runtime = live_runtime.clone();
+        live_btn.connect_clicked(move |_| {
+            live::toggle(ctx.clone(), runtime.clone());
+        });
+    }
+
+    {
+        let ctx = live_ctx.clone();
+        let runtime = live_runtime.clone();
+        reply_btn.connect_clicked(move |_| {
+            live::request_manual_answer(ctx.clone(), runtime.clone());
         });
     }
 
@@ -297,6 +346,8 @@ pub fn build_input(
 
     buttons_box.append(&audio_btn);
     buttons_box.append(&listen_btn);
+    buttons_box.append(&live_btn);
+    buttons_box.append(&reply_btn);
     buttons_box.append(&area_btn);
     buttons_box.append(&screenshot_btn);
     buttons_box.append(&save_btn);

@@ -11,6 +11,7 @@
 //! - `build_input` - interactive controls (receives input)
 
 mod audio;
+mod live;
 pub mod markdown;
 mod messaging;
 mod view;

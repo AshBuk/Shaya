@@ -260,6 +260,59 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
 
     page.add(&stt_group);
 
+    // Live Assistant group
+    let live_group = adw::PreferencesGroup::new();
+    live_group.set_title("Live Assistant");
+
+    let chunk_row = adw::ActionRow::new();
+    chunk_row.set_title("Chunk Duration");
+    chunk_row.set_subtitle("System audio chunk size in seconds");
+    let chunk_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 3.0, 10.0, 1.0);
+    chunk_scale.set_value(state.borrow().settings.live_chunk_secs as f64);
+    chunk_scale.set_draw_value(true);
+    chunk_scale.set_value_pos(gtk4::PositionType::Right);
+    chunk_scale.set_hexpand(true);
+    chunk_scale.set_width_request(200);
+    chunk_scale.set_format_value_func(|_, value| format!("{:.0}s", value));
+
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    chunk_scale.connect_value_changed(move |scale| {
+        state_c.borrow_mut().settings.live_chunk_secs = scale.value().round() as u64;
+        schedule_autosave(&debounce, &state_c);
+    });
+    chunk_row.add_suffix(&chunk_scale);
+    chunk_row.set_activatable_widget(Some(&chunk_scale));
+    live_group.add(&chunk_row);
+
+    let auto_suggest_row = adw::SwitchRow::new();
+    auto_suggest_row.set_title("Auto Suggest");
+    auto_suggest_row.set_subtitle("Answer automatically after speech pauses");
+    auto_suggest_row.set_active(state.borrow().settings.live_auto_suggest);
+
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    auto_suggest_row.connect_active_notify(move |row| {
+        state_c.borrow_mut().settings.live_auto_suggest = row.is_active();
+        schedule_autosave(&debounce, &state_c);
+    });
+    live_group.add(&auto_suggest_row);
+
+    let debug_row = adw::SwitchRow::new();
+    debug_row.set_title("Transcript Debug");
+    debug_row.set_subtitle("Show recent live transcript in the chat status area");
+    debug_row.set_active(state.borrow().settings.live_debug_transcript);
+
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    debug_row.connect_active_notify(move |row| {
+        state_c.borrow_mut().settings.live_debug_transcript = row.is_active();
+        schedule_autosave(&debounce, &state_c);
+    });
+    live_group.add(&debug_row);
+
+    page.add(&live_group);
+
     // Appearance group
     let appearance_group = adw::PreferencesGroup::new();
     appearance_group.set_title("Appearance");
