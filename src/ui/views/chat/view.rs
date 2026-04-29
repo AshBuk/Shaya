@@ -47,6 +47,8 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     // Status label (shows recording/transcribing state)
     let status_label = Label::new(None);
     status_label.set_halign(gtk4::Align::Start);
+    status_label.set_wrap(true);
+    status_label.set_max_width_chars(40);
     status_label.add_css_class("dim-label");
     status_label.set_visible(false);
     vbox.append(&status_label);
@@ -55,6 +57,7 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     transcript_label.set_halign(gtk4::Align::Start);
     transcript_label.set_selectable(true);
     transcript_label.set_wrap(true);
+    transcript_label.set_max_width_chars(40);
     transcript_label.add_css_class("dim-label");
     transcript_label.set_visible(false);
     vbox.append(&transcript_label);
