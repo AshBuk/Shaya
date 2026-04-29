@@ -87,7 +87,7 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             return;
         }
         (
-            state.settings.live_chunk_secs.clamp(3, 10),
+            state.settings.live_chunk_secs.clamp(5, 12),
             state.settings.provider,
             state.settings.active_model().to_string(),
             state.settings.stt_provider,

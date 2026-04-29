@@ -169,7 +169,7 @@ fn default_opacity() -> f64 {
     1.0
 }
 fn default_live_chunk_secs() -> u64 {
-    4
+    10
 }
 fn default_live_auto_suggest() -> bool {
     true

@@ -267,7 +267,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let chunk_row = adw::ActionRow::new();
     chunk_row.set_title("Chunk Duration");
     chunk_row.set_subtitle("System audio chunk size in seconds");
-    let chunk_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 3.0, 10.0, 1.0);
+    let chunk_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 5.0, 12.0, 1.0);
     chunk_scale.set_value(state.borrow().settings.live_chunk_secs as f64);
     chunk_scale.set_draw_value(true);
     chunk_scale.set_value_pos(gtk4::PositionType::Right);
