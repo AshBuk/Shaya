@@ -11,7 +11,7 @@ use crate::core::api::{LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::live::{
     is_no_suggestion, live_transcript_message, LiveRequestRange, LiveSession, LiveSessionManager,
-    TranscriptSegment, LIVE_SYSTEM_PROMPT,
+    LIVE_SYSTEM_PROMPT, MAX_PENDING_CHUNKS,
 };
 use crate::core::state::{AppState, ImageData, Message, Role};
 use chrono::{DateTime, Utc};
@@ -131,7 +131,12 @@ fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             let _ = recorder.stop();
         }
         live.active_chunk = None;
+        let fallback_seq = live.next_seq.saturating_sub(1);
         if let Some(mut session) = live.session.take() {
+            let closing_seq = session
+                .pending_to_seq
+                .or_else(|| (fallback_seq > 0).then_some(fallback_seq));
+            close_pending_session(&ctx, &mut session, closing_seq);
             session.metadata.ended_at = Some(Utc::now());
             session_to_save = Some(session.metadata);
         }
@@ -233,14 +238,11 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     };
 
     let (Some(mut recorder), Some(chunk)) = (recorder, chunk) else {
-        request_answer(ctx, runtime, true);
+        finish_force_reply(ctx, runtime, None);
         return;
     };
 
     let stopped = recorder.stop();
-    if runtime.borrow().is_active() {
-        start_next_chunk(ctx.clone(), runtime.clone());
-    }
 
     match stopped {
         Ok(audio_path) => {
@@ -248,7 +250,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         }
         Err(e) => {
             show_status(&ctx.status_label, &format!("Live flush skipped: {}", e));
-            request_answer(ctx, runtime, true);
+            finish_force_reply(ctx, runtime, Some(chunk.seq));
         }
     }
 }
@@ -295,20 +297,30 @@ fn process_chunk(
 
         match result {
             Ok(Ok(ChunkResult::Silent)) => {
-                if force_reply_after && runtime.borrow().is_active() {
-                    request_answer(ctx, runtime, true);
+                if force_reply_after {
+                    finish_force_reply(ctx, runtime, Some(seq));
                 } else {
-                    handle_silent_chunk(ctx, runtime);
+                    handle_silent_chunk(ctx, runtime, seq);
                 }
             }
             Ok(Ok(ChunkResult::Speech(text))) => {
                 handle_speech_chunk(ctx.clone(), runtime.clone(), seq, started_at, text);
-                if force_reply_after && runtime.borrow().is_active() {
-                    request_answer(ctx, runtime, true);
+                if force_reply_after {
+                    finish_force_reply(ctx, runtime, Some(seq));
                 }
             }
-            Ok(Err(e)) => show_status(&ctx.status_label, &format!("Live STT failed: {}", e)),
-            Err(e) => show_status(&ctx.status_label, &format!("Live STT task failed: {:?}", e)),
+            Ok(Err(e)) => {
+                show_status(&ctx.status_label, &format!("Live STT failed: {}", e));
+                if force_reply_after {
+                    finish_force_reply(ctx, runtime, Some(seq));
+                }
+            }
+            Err(e) => {
+                show_status(&ctx.status_label, &format!("Live STT task failed: {:?}", e));
+                if force_reply_after {
+                    finish_force_reply(ctx, runtime, Some(seq));
+                }
+            }
         }
     });
 }
@@ -320,45 +332,100 @@ fn handle_speech_chunk(
     started_at: DateTime<Utc>,
     text: String,
 ) {
-    let segment = TranscriptSegment {
-        seq,
-        started_at,
-        ended_at: Utc::now(),
-        text,
-    };
-
-    {
+    let should_close = {
         let mut live = runtime.borrow_mut();
         let Some(session) = live.session.as_mut() else {
             return;
         };
         session.last_speech_seq = Some(seq);
-        session.transcript.append(segment.clone());
-        if let Err(e) = LiveSessionManager::append_transcript(&session.metadata.id, &segment) {
-            tracing::warn!("Failed to save live transcript: {}", e);
-        }
+        session.append_to_pending(seq, started_at, Utc::now(), &text);
         update_transcript_preview(&ctx, session);
+        session
+            .pending_span()
+            .is_some_and(|span| span >= MAX_PENDING_CHUNKS)
+    };
+
+    if should_close {
+        close_pending_utterance(&ctx, &runtime, Some(seq));
     }
 
     show_status(&ctx.status_label, "Live: listening");
 }
 
-fn handle_silent_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
-    let should_trigger = {
-        let live = runtime.borrow();
-        let Some(session) = live.session.as_ref() else {
-            return;
-        };
-        ctx.state.borrow().settings.live_auto_suggest
-            && session.last_speech_seq.is_some()
-            && session.pending_range().is_some()
-    };
+fn handle_silent_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, seq: u64) {
+    let closed = close_pending_utterance(&ctx, &runtime, Some(seq));
+    let should_trigger = closed && ctx.state.borrow().settings.live_auto_suggest;
 
     if should_trigger {
         request_answer(ctx, runtime, false);
     } else if runtime.borrow().is_active() {
         show_status(&ctx.status_label, "Live: listening");
     }
+}
+
+fn finish_force_reply(
+    ctx: LiveContext,
+    runtime: Rc<RefCell<LiveRuntime>>,
+    closing_seq: Option<u64>,
+) {
+    if !runtime.borrow().is_active() {
+        return;
+    }
+    let closed = close_pending_utterance(&ctx, &runtime, closing_seq);
+    let has_closed_transcript = runtime
+        .borrow()
+        .session
+        .as_ref()
+        .is_some_and(|session| session.pending_range().is_some());
+    if closed || has_closed_transcript {
+        request_answer(ctx.clone(), runtime.clone(), true);
+    } else {
+        show_status(&ctx.status_label, "Live: no new transcript");
+    }
+    if runtime.borrow().is_active() {
+        start_next_chunk(ctx, runtime);
+    }
+}
+
+fn close_pending_utterance(
+    ctx: &LiveContext,
+    runtime: &Rc<RefCell<LiveRuntime>>,
+    closing_seq: Option<u64>,
+) -> bool {
+    let mut live = runtime.borrow_mut();
+    let Some(session) = live.session.as_mut() else {
+        return false;
+    };
+    close_pending_session(ctx, session, closing_seq)
+}
+
+fn close_pending_session(
+    ctx: &LiveContext,
+    session: &mut LiveSession,
+    closing_seq: Option<u64>,
+) -> bool {
+    let from_seq = session.pending_from_seq;
+    let to_seq = session.pending_to_seq;
+    let Some(closing_seq) = closing_seq.or(session.pending_to_seq) else {
+        return false;
+    };
+    let Some(segment) = session.take_pending_segment(closing_seq) else {
+        return false;
+    };
+
+    session.transcript.append(segment.clone());
+    if let Err(e) = LiveSessionManager::append_transcript(&session.metadata.id, &segment) {
+        tracing::warn!("Failed to save live transcript: {}", e);
+    }
+    tracing::info!(
+        "closed utterance seq={} chunks={}-{} len={}",
+        segment.seq,
+        from_seq.unwrap_or(segment.seq),
+        to_seq.unwrap_or(segment.seq),
+        segment.text.len()
+    );
+    update_transcript_preview(ctx, session);
+    true
 }
 
 fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: bool) {
@@ -481,7 +548,27 @@ fn update_transcript_preview(ctx: &LiveContext, session: &LiveSession) {
     if !ctx.state.borrow().settings.live_debug_transcript {
         return;
     }
-    let text = session.transcript.latest_lines(5);
+    let mut lines = Vec::new();
+    let closed = session.transcript.latest_lines(3);
+    if !closed.is_empty() {
+        lines.push(closed);
+    }
+    if session.has_pending() {
+        let pending_text = session
+            .pending_utterance
+            .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(format!(
+            "pending [{}-{}]: {}",
+            session.pending_from_seq.unwrap_or(0),
+            session.pending_to_seq.unwrap_or(0),
+            pending_text
+        ));
+    }
+    let text = lines.join("\n");
     ctx.transcript_label
         .set_text(&format!("Live transcript:\n{}", text));
     ctx.transcript_label.set_visible(!text.is_empty());

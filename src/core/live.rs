@@ -15,6 +15,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 pub const NO_SUGGESTION: &str = "NO_SUGGESTION";
+pub const MAX_PENDING_CHUNKS: u64 = 6;
 
 pub const LIVE_SYSTEM_PROMPT: &str = r#"You are Live Assistant, helping the user during a live meeting or interview.
 
@@ -111,6 +112,11 @@ pub struct LiveSession {
     pub last_evaluated_seq: u64,
     pub in_flight: Option<LiveRequestRange>,
     pub last_speech_seq: Option<u64>,
+    pub pending_utterance: Vec<String>,
+    pub pending_from_seq: Option<u64>,
+    pub pending_to_seq: Option<u64>,
+    pub pending_started_at: Option<DateTime<Utc>>,
+    pub pending_ended_at: Option<DateTime<Utc>>,
 }
 
 impl LiveSession {
@@ -137,7 +143,72 @@ impl LiveSession {
             last_evaluated_seq: 0,
             in_flight: None,
             last_speech_seq: None,
+            pending_utterance: Vec::new(),
+            pending_from_seq: None,
+            pending_to_seq: None,
+            pending_started_at: None,
+            pending_ended_at: None,
         }
+    }
+
+    pub fn append_to_pending(
+        &mut self,
+        seq: u64,
+        ts_start: DateTime<Utc>,
+        ts_end: DateTime<Utc>,
+        text: &str,
+    ) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        if self.pending_from_seq.is_none() {
+            self.pending_from_seq = Some(seq);
+            self.pending_started_at = Some(ts_start);
+        }
+        self.pending_to_seq = Some(seq);
+        self.pending_ended_at = Some(ts_end);
+        self.pending_utterance.push(text.to_string());
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.pending_utterance.iter().any(|s| !s.trim().is_empty())
+    }
+
+    pub fn pending_span(&self) -> Option<u64> {
+        let from_seq = self.pending_from_seq?;
+        let to_seq = self.pending_to_seq?;
+        Some(to_seq.saturating_sub(from_seq) + 1)
+    }
+
+    pub fn take_pending_segment(&mut self, closing_seq: u64) -> Option<TranscriptSegment> {
+        if self.pending_utterance.is_empty() {
+            return None;
+        }
+
+        let text = normalize_utterance(&self.pending_utterance);
+        let started_at = self.pending_started_at;
+        let ended_at = self.pending_ended_at.unwrap_or_else(Utc::now);
+        self.clear_pending();
+
+        if text.is_empty() {
+            return None;
+        }
+
+        Some(TranscriptSegment {
+            seq: closing_seq,
+            started_at: started_at?,
+            ended_at,
+            text,
+        })
+    }
+
+    fn clear_pending(&mut self) {
+        self.pending_utterance.clear();
+        self.pending_from_seq = None;
+        self.pending_to_seq = None;
+        self.pending_started_at = None;
+        self.pending_ended_at = None;
     }
 
     pub fn pending_range(&self) -> Option<LiveRequestRange> {
@@ -156,6 +227,18 @@ impl LiveSession {
             self.in_flight = None;
         }
     }
+}
+
+fn normalize_utterance(parts: &[String]) -> String {
+    parts
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn live_transcript_message(
@@ -230,6 +313,16 @@ impl LiveSessionManager {
 mod tests {
     use super::*;
 
+    fn session() -> LiveSession {
+        LiveSession::new(
+            4,
+            AiProvider::Groq,
+            "model".to_string(),
+            SttProvider::Groq,
+            "stt".to_string(),
+        )
+    }
+
     fn segment(seq: u64, text: &str) -> TranscriptSegment {
         TranscriptSegment {
             seq,
@@ -258,17 +351,67 @@ mod tests {
 
     #[test]
     fn duplicate_in_flight_range_is_ignored() {
-        let mut session = LiveSession::new(
-            4,
-            AiProvider::Groq,
-            "model".to_string(),
-            SttProvider::Groq,
-            "stt".to_string(),
-        );
+        let mut session = session();
         session.transcript.append(segment(1, "question"));
         let range = session.pending_range().unwrap();
         session.in_flight = Some(range);
 
         assert_eq!(session.pending_range(), None);
+    }
+
+    #[test]
+    fn append_to_pending_two_chunks_joins_with_space() {
+        let mut session = session();
+        let now = Utc::now();
+        session.append_to_pending(1, now, now, "Can you explain");
+        session.append_to_pending(2, now, now, "ownership?");
+
+        let segment = session.take_pending_segment(2).unwrap();
+
+        assert_eq!(segment.text, "Can you explain ownership?");
+        assert_eq!(segment.seq, 2);
+    }
+
+    #[test]
+    fn normalize_utterance_collapses_whitespace() {
+        let parts = vec![
+            "  Can   you  ".to_string(),
+            "".to_string(),
+            " explain\nownership? ".to_string(),
+        ];
+
+        assert_eq!(normalize_utterance(&parts), "Can you explain ownership?");
+    }
+
+    #[test]
+    fn take_pending_segment_returns_none_when_empty() {
+        let mut session = session();
+
+        assert!(session.take_pending_segment(1).is_none());
+    }
+
+    #[test]
+    fn take_pending_segment_resets_state() {
+        let mut session = session();
+        let now = Utc::now();
+        session.append_to_pending(1, now, now, "question");
+
+        assert!(session.take_pending_segment(1).is_some());
+
+        assert!(!session.has_pending());
+        assert_eq!(session.pending_from_seq, None);
+        assert_eq!(session.pending_to_seq, None);
+        assert_eq!(session.pending_started_at, None);
+        assert_eq!(session.pending_ended_at, None);
+    }
+
+    #[test]
+    fn pending_span_tracks_chunk_range() {
+        let mut session = session();
+        let now = Utc::now();
+        session.append_to_pending(3, now, now, "first");
+        session.append_to_pending(5, now, now, "third");
+
+        assert_eq!(session.pending_span(), Some(3));
     }
 }
