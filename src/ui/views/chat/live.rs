@@ -44,7 +44,14 @@ pub(super) struct LiveContext {
 pub(super) struct LiveRuntime {
     session: Option<LiveSession>,
     recorder: Option<ListenRecorder>,
+    active_chunk: Option<ActiveChunk>,
     next_seq: u64,
+}
+
+#[derive(Clone, Copy)]
+struct ActiveChunk {
+    seq: u64,
+    started_at: DateTime<Utc>,
 }
 
 enum ChunkResult {
@@ -67,7 +74,7 @@ pub(super) fn toggle(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 }
 
 pub(super) fn request_manual_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
-    request_answer(ctx, runtime, true);
+    force_flush_and_answer(ctx, runtime);
 }
 
 fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
@@ -123,6 +130,7 @@ fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         if let Some(mut recorder) = live.recorder.take() {
             let _ = recorder.stop();
         }
+        live.active_chunk = None;
         if let Some(mut session) = live.session.take() {
             session.metadata.ended_at = Some(Utc::now());
             session_to_save = Some(session.metadata);
@@ -160,8 +168,12 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         return;
     }
 
-    runtime.borrow_mut().recorder = Some(recorder);
     let started_at = Utc::now();
+    {
+        let mut live = runtime.borrow_mut();
+        live.recorder = Some(recorder);
+        live.active_chunk = Some(ActiveChunk { seq, started_at });
+    }
     glib::timeout_add_local_once(Duration::from_secs(chunk_secs), move || {
         finish_chunk(ctx, runtime, seq, started_at);
     });
@@ -175,6 +187,10 @@ fn finish_chunk(
 ) {
     let audio_path = {
         let mut live = runtime.borrow_mut();
+        if live.active_chunk.is_none_or(|chunk| chunk.seq != seq) {
+            return;
+        }
+        live.active_chunk = None;
         let Some(mut recorder) = live.recorder.take() else {
             return;
         };
@@ -195,7 +211,46 @@ fn finish_chunk(
     if runtime.borrow().is_active() {
         start_next_chunk(ctx.clone(), runtime.clone());
     }
-    process_chunk(ctx, runtime, seq, started_at, audio_path);
+    process_chunk(ctx, runtime, seq, started_at, audio_path, false);
+}
+
+fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
+    let (recorder, chunk) = {
+        let mut live = runtime.borrow_mut();
+        if live.session.is_none() {
+            show_status(&ctx.status_label, "Live is not active");
+            return;
+        }
+        if live
+            .session
+            .as_ref()
+            .is_some_and(|session| session.in_flight.is_some())
+        {
+            show_status(&ctx.status_label, "Live: thinking");
+            return;
+        }
+        (live.recorder.take(), live.active_chunk.take())
+    };
+
+    let (Some(mut recorder), Some(chunk)) = (recorder, chunk) else {
+        request_answer(ctx, runtime, true);
+        return;
+    };
+
+    let stopped = recorder.stop();
+    if runtime.borrow().is_active() {
+        start_next_chunk(ctx.clone(), runtime.clone());
+    }
+
+    match stopped {
+        Ok(audio_path) => {
+            process_chunk(ctx, runtime, chunk.seq, chunk.started_at, audio_path, true);
+        }
+        Err(e) => {
+            show_status(&ctx.status_label, &format!("Live flush skipped: {}", e));
+            request_answer(ctx, runtime, true);
+        }
+    }
 }
 
 fn process_chunk(
@@ -204,6 +259,7 @@ fn process_chunk(
     seq: u64,
     started_at: DateTime<Utc>,
     audio_path: PathBuf,
+    force_reply_after: bool,
 ) {
     let (stt_provider, stt_key, stt_model) = {
         let state = ctx.state.borrow();
@@ -238,9 +294,18 @@ fn process_chunk(
         .await;
 
         match result {
-            Ok(Ok(ChunkResult::Silent)) => handle_silent_chunk(ctx, runtime),
+            Ok(Ok(ChunkResult::Silent)) => {
+                if force_reply_after && runtime.borrow().is_active() {
+                    request_answer(ctx, runtime, true);
+                } else {
+                    handle_silent_chunk(ctx, runtime);
+                }
+            }
             Ok(Ok(ChunkResult::Speech(text))) => {
-                handle_speech_chunk(ctx, runtime, seq, started_at, text)
+                handle_speech_chunk(ctx.clone(), runtime.clone(), seq, started_at, text);
+                if force_reply_after && runtime.borrow().is_active() {
+                    request_answer(ctx, runtime, true);
+                }
             }
             Ok(Err(e)) => show_status(&ctx.status_label, &format!("Live STT failed: {}", e)),
             Err(e) => show_status(&ctx.status_label, &format!("Live STT task failed: {:?}", e)),
