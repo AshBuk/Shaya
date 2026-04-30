@@ -17,6 +17,7 @@ You are a staff Rust engineer. Write concise, idiomatic Rust.
 ./dev docker   # Docker build
 ./dev lint     # cargo clippy
 ./dev fmt      # cargo fmt
+./dev test     # cargo test
 ```
 
 ### Direct Commands

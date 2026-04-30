@@ -19,6 +19,7 @@ if [ $# -eq 0 ]; then
     echo "  ./dev logs     # View logs"
     echo "  ./dev lint     # cargo clippy"
     echo "  ./dev fmt      # cargo fmt"
+    echo "  ./dev test     # cargo test"
     exit 0
 fi
 
@@ -26,7 +27,7 @@ COMMAND=$1
 shift
 
 case "$COMMAND" in
-    run|debug|logs|docker|lint|fmt)
+    run|debug|logs|docker|lint|fmt|test)
         if [ -f "$SCRIPTS_DIR/$COMMAND" ]; then
             exec "$SCRIPTS_DIR/$COMMAND" "$@"
         else

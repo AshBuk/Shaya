@@ -1,0 +1,42 @@
+#!/bin/bash
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/Shaya
+
+# Run Rust tests (inside Docker)
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_ROOT/docker" || exit 1
+
+# Detect docker compose command
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DC="docker compose"
+elif command -v docker-compose &> /dev/null; then
+    DC="docker-compose"
+else
+    echo "Error: Docker Compose not available"
+    exit 1
+fi
+
+$DC up -d
+
+echo "=== Running tests ==="
+echo ""
+
+$DC exec shaya bash -c '
+    cd /app
+    cargo test "$@"
+    EXIT_CODE=$?
+
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo "✓ Tests passed!"
+    else
+        echo "✗ Tests failed"
+    fi
+
+    exit $EXIT_CODE
+' bash "$@"
