@@ -7,13 +7,13 @@
 //! Chat-integrated Live Assistant controls.
 
 use super::messaging;
-use crate::core::api::{LlmClient, WhisperClient};
+use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::live::{
     is_no_suggestion, live_transcript_message, LiveRequestRange, LiveSession, LiveSessionManager,
     LIVE_SYSTEM_PROMPT, MAX_PENDING_CHUNKS,
 };
-use crate::core::state::{AppState, ImageData, Message, Role};
+use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
 use chrono::{DateTime, Utc};
 use gtk4::gio;
 use gtk4::glib;
@@ -24,6 +24,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
+
+const LIVE_CONTEXT_MESSAGES: usize = 8;
 
 #[derive(Clone)]
 pub(super) struct LiveContext {
@@ -450,27 +452,37 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         (range, transcript_text)
     };
 
-    let (provider, api_key, model, system_prompt, mut messages) = {
+    let (provider, api_key, model, system_prompt, mut messages, cache_up_to_message) = {
         let state = ctx.state.borrow();
+        let provider = state.settings.provider;
+        let messages = live_context_messages(&state, provider);
+        let cache_up_to_message = (provider == AiProvider::Anthropic)
+            .then(|| last_anthropic_message_index(&messages))
+            .flatten();
         (
-            state.settings.provider,
+            provider,
             state.settings.active_api_key().to_string(),
             state.settings.active_model().to_string(),
             live_system_prompt(&state),
-            state.current_messages.clone(),
+            messages,
+            cache_up_to_message,
         )
     };
 
     let pending_message =
         live_transcript_message(transcript_text, ctx.attached_image.borrow().clone());
     messages.push(pending_message.clone());
+    let options = ChatOptions {
+        anthropic_cache: provider == AiProvider::Anthropic,
+        cache_up_to_message,
+    };
 
     show_status(&ctx.status_label, "Live: thinking");
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::new(provider, &api_key, &model);
             client
-                .chat(&messages, &system_prompt)
+                .chat_with_options(&messages, &system_prompt, options)
                 .map_err(|e| e.to_string())
         })
         .await;
@@ -544,6 +556,24 @@ fn live_system_prompt(state: &AppState) -> String {
     }
 }
 
+fn live_context_messages(state: &AppState, provider: AiProvider) -> Vec<Message> {
+    if provider == AiProvider::Anthropic {
+        return state.current_messages.clone();
+    }
+
+    let len = state.current_messages.len();
+    state.current_messages[len.saturating_sub(LIVE_CONTEXT_MESSAGES)..].to_vec()
+}
+
+fn last_anthropic_message_index(messages: &[Message]) -> Option<usize> {
+    messages
+        .iter()
+        .filter(|msg| msg.role != Role::System)
+        .enumerate()
+        .last()
+        .map(|(idx, _)| idx)
+}
+
 fn update_transcript_preview(ctx: &LiveContext, session: &LiveSession) {
     if !ctx.state.borrow().settings.live_debug_transcript {
         return;
@@ -585,4 +615,35 @@ fn set_live_buttons(ctx: &LiveContext, active: bool) {
 fn show_status(status_label: &Label, text: &str) {
     status_label.set_text(text);
     status_label.set_visible(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(role: Role) -> Message {
+        Message {
+            role,
+            content: String::new(),
+            image: None,
+        }
+    }
+
+    #[test]
+    fn anthropic_cache_index_ignores_system_messages() {
+        let messages = vec![
+            message(Role::System),
+            message(Role::User),
+            message(Role::Assistant),
+        ];
+
+        assert_eq!(last_anthropic_message_index(&messages), Some(1));
+    }
+
+    #[test]
+    fn anthropic_cache_index_is_none_without_chat_messages() {
+        let messages = vec![message(Role::System)];
+
+        assert_eq!(last_anthropic_message_index(&messages), None);
+    }
 }
