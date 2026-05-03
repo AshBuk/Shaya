@@ -235,29 +235,6 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     });
     stt_group.add(&stt_model_row);
 
-    // Wire STT provider selector
-    let state_c = state.clone();
-    let debounce = save_debounce.clone();
-    let stt_key_c = stt_key_row.clone();
-    let stt_model_c = stt_model_row.clone();
-    let stt_updating_c = stt_updating.clone();
-    stt_provider_row.connect_selected_notify(move |row| {
-        let idx = row.selected() as usize;
-        let provider = SttProvider::ALL.get(idx).copied().unwrap_or_default();
-
-        stt_updating_c.set(true);
-        state_c.borrow_mut().settings.stt_provider = provider;
-        stt_key_c.set_text(state_c.borrow().settings.active_stt_key());
-        rebuild_stt_model_list(
-            &stt_model_c,
-            provider,
-            state_c.borrow().settings.active_stt_model(),
-        );
-        stt_updating_c.set(false);
-
-        schedule_autosave(&debounce, &state_c);
-    });
-
     page.add(&stt_group);
 
     // Live Assistant group
@@ -267,8 +244,9 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let chunk_row = adw::ActionRow::new();
     chunk_row.set_title("Chunk Duration");
     chunk_row.set_subtitle("System audio chunk size in seconds");
-    let chunk_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 5.0, 12.0, 1.0);
-    chunk_scale.set_value(state.borrow().settings.live_chunk_secs as f64);
+    let chunk_min = state.borrow().settings.min_live_chunk_secs() as f64;
+    let chunk_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, chunk_min, 12.0, 1.0);
+    chunk_scale.set_value(state.borrow().settings.effective_live_chunk_secs() as f64);
     chunk_scale.set_draw_value(true);
     chunk_scale.set_value_pos(gtk4::PositionType::Right);
     chunk_scale.set_hexpand(true);
@@ -278,12 +256,51 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let state_c = state.clone();
     let debounce = save_debounce.clone();
     chunk_scale.connect_value_changed(move |scale| {
-        state_c.borrow_mut().settings.live_chunk_secs = scale.value().round() as u64;
+        let mut state = state_c.borrow_mut();
+        let value = scale.value().round() as u64;
+        state.settings.live_chunk_secs = value.clamp(state.settings.min_live_chunk_secs(), 12);
         schedule_autosave(&debounce, &state_c);
     });
     chunk_row.add_suffix(&chunk_scale);
     chunk_row.set_activatable_widget(Some(&chunk_scale));
     live_group.add(&chunk_row);
+
+    // Wire STT provider selector after chunk controls exist so UI bounds follow billing minimums.
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    let stt_key_c = stt_key_row.clone();
+    let stt_model_c = stt_model_row.clone();
+    let stt_updating_c = stt_updating.clone();
+    let chunk_scale_c = chunk_scale.clone();
+    stt_provider_row.connect_selected_notify(move |row| {
+        let idx = row.selected() as usize;
+        let provider = SttProvider::ALL.get(idx).copied().unwrap_or_default();
+
+        stt_updating_c.set(true);
+        {
+            let mut state = state_c.borrow_mut();
+            state.settings.stt_provider = provider;
+            state.settings.live_chunk_secs = state.settings.effective_live_chunk_secs();
+        }
+        stt_key_c.set_text(state_c.borrow().settings.active_stt_key());
+        rebuild_stt_model_list(
+            &stt_model_c,
+            provider,
+            state_c.borrow().settings.active_stt_model(),
+        );
+        let (chunk_min, chunk_value) = {
+            let state = state_c.borrow();
+            (
+                state.settings.min_live_chunk_secs(),
+                state.settings.effective_live_chunk_secs(),
+            )
+        };
+        chunk_scale_c.set_range(chunk_min as f64, 12.0);
+        chunk_scale_c.set_value(chunk_value as f64);
+        stt_updating_c.set(false);
+
+        schedule_autosave(&debounce, &state_c);
+    });
 
     let auto_suggest_row = adw::SwitchRow::new();
     auto_suggest_row.set_title("Auto Suggest");

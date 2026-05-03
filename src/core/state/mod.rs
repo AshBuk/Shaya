@@ -96,6 +96,17 @@ pub struct Settings {
 }
 
 impl Settings {
+    pub fn min_live_chunk_secs(&self) -> u64 {
+        match self.stt_provider {
+            SttProvider::Groq => 10,
+            SttProvider::OpenAI => 5,
+        }
+    }
+
+    pub fn effective_live_chunk_secs(&self) -> u64 {
+        self.live_chunk_secs.clamp(self.min_live_chunk_secs(), 12)
+    }
+
     /// Get API key for the active provider
     pub fn active_api_key(&self) -> &str {
         match self.provider {
