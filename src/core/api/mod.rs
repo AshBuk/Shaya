@@ -9,7 +9,7 @@
 pub mod llm;
 pub mod whisper;
 
-pub use llm::LlmClient;
+pub use llm::{ChatOptions, LlmClient};
 pub use whisper::WhisperClient;
 
 use serde::Deserialize;
