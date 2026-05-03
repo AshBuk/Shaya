@@ -360,6 +360,28 @@ mod tests {
     }
 
     #[test]
+    fn stale_in_flight_reschedules_one_expanded_range() {
+        let mut session = session();
+        session.transcript.append(segment(1, "first question"));
+        let stale_range = session.pending_range().unwrap();
+        session.in_flight = Some(stale_range);
+
+        session.transcript.append(segment(2, "newer question"));
+        session.in_flight = None;
+        let expanded_range = session.pending_range().unwrap();
+
+        assert_eq!(
+            expanded_range,
+            LiveRequestRange {
+                from_seq: 1,
+                to_seq: 2,
+            }
+        );
+        session.in_flight = Some(expanded_range);
+        assert_eq!(session.pending_range(), None);
+    }
+
+    #[test]
     fn append_to_pending_two_chunks_joins_with_space() {
         let mut session = session();
         let now = Utc::now();
