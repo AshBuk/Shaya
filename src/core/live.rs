@@ -253,7 +253,7 @@ pub fn live_transcript_message(
 }
 
 pub fn is_no_suggestion(response: &str) -> bool {
-    response.trim() == NO_SUGGESTION
+    response.trim().starts_with(NO_SUGGESTION)
 }
 
 pub struct LiveSessionManager;
@@ -346,7 +346,11 @@ mod tests {
     fn no_suggestion_is_exact_internal_sentinel() {
         assert!(is_no_suggestion("NO_SUGGESTION"));
         assert!(is_no_suggestion(" NO_SUGGESTION\n"));
+        assert!(is_no_suggestion(
+            "NO_SUGGESTION\n\n(This is not a question)"
+        ));
         assert!(!is_no_suggestion("No suggestion."));
+        assert!(!is_no_suggestion("The answer is NO_SUGGESTION here"));
     }
 
     #[test]
