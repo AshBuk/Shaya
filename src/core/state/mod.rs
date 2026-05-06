@@ -371,10 +371,7 @@ impl AppState {
     /// Toggle prompt active state
     pub fn toggle_prompt(&mut self, id: &str) {
         if let Some(pos) = self.active_prompt_ids.iter().position(|i| i == id) {
-            // Don't allow deactivating the last prompt
-            if self.active_prompt_ids.len() > 1 {
-                self.active_prompt_ids.remove(pos);
-            }
+            self.active_prompt_ids.remove(pos);
         } else {
             self.active_prompt_ids.push(id.to_string());
         }
@@ -391,11 +388,8 @@ impl AppState {
         id
     }
 
-    /// Remove prompt by ID (can't remove last one)
+    /// Remove prompt by ID
     pub fn remove_prompt(&mut self, id: &str) -> bool {
-        if self.prompts.len() <= 1 {
-            return false;
-        }
         if let Some(pos) = self.prompts.iter().position(|p| p.id == id) {
             self.prompts.remove(pos);
             self.active_prompt_ids.retain(|i| i != id);

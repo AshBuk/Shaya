@@ -125,10 +125,13 @@ impl LlmClient {
                 &self.model
             };
 
-        let mut chat_messages = vec![json!({
-            "role": "system",
-            "content": system_prompt
-        })];
+        let mut chat_messages = Vec::new();
+        if !system_prompt.is_empty() {
+            chat_messages.push(json!({
+                "role": "system",
+                "content": system_prompt
+            }));
+        }
 
         for msg in messages {
             chat_messages.push(build_openai_message(msg));
@@ -188,12 +191,14 @@ impl LlmClient {
             })
             .collect();
 
-        let request = json!({
+        let mut request = json!({
             "model": self.model,
             "max_tokens": max_tokens(self.provider),
-            "system": anthropic_system(system_prompt, options.anthropic_cache),
             "messages": chat_messages
         });
+        if !system_prompt.is_empty() {
+            request["system"] = anthropic_system(system_prompt, options.anthropic_cache);
+        }
 
         let response = ureq::post(ANTHROPIC_API_URL)
             .set("x-api-key", &self.api_key)

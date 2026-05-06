@@ -35,6 +35,48 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
         container.remove(&child);
     }
 
+    let state_ref = state.borrow();
+
+    if state_ref.prompts.is_empty() {
+        drop(state_ref);
+
+        let empty_box = GtkBox::new(Orientation::Vertical, 12);
+        empty_box.set_vexpand(true);
+
+        let status = adw::StatusPage::new();
+        status.set_icon_name(Some("document-edit-symbolic"));
+        status.set_title("No System Prompts");
+        status.set_description(Some("Chat will work without a system prompt"));
+        empty_box.append(&status);
+
+        let add_btn = Button::with_label("Add Prompt");
+        add_btn.add_css_class("suggested-action");
+        add_btn.set_halign(gtk4::Align::Center);
+        add_btn.set_margin_bottom(16);
+
+        let state_c = state.clone();
+        let container_c = container.clone();
+        add_btn.connect_clicked(move |_| {
+            let id = state_c.borrow_mut().add_prompt(
+                "New Prompt".to_string(),
+                "You are a helpful AI assistant.".to_string(),
+            );
+            state_c.borrow_mut().active_prompt_ids.push(id);
+            let _ = state_c.borrow().save();
+            rebuild_content(&container_c, &state_c);
+        });
+        empty_box.append(&add_btn);
+
+        let scroll = ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .vexpand(true)
+            .child(&empty_box)
+            .build();
+        container.append(&scroll);
+        return;
+    }
+
     let inner = GtkBox::new(Orientation::Vertical, 12);
     inner.set_margin_top(12);
     inner.set_margin_bottom(12);
@@ -51,8 +93,6 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.add_css_class("boxed-list");
-
-    let state_ref = state.borrow();
 
     for prompt in state_ref.prompts.iter() {
         let row = adw::ActionRow::new();
@@ -110,47 +150,44 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
 
         row.add_suffix(&edit_btn);
 
-        // Delete button (if more than one prompt)
-        if state_ref.prompts.len() > 1 {
-            let delete_btn = Button::from_icon_name("user-trash-symbolic");
-            delete_btn.set_valign(gtk4::Align::Center);
-            delete_btn.add_css_class("flat");
-            delete_btn.set_tooltip_text(Some("Delete prompt"));
+        let delete_btn = Button::from_icon_name("user-trash-symbolic");
+        delete_btn.set_valign(gtk4::Align::Center);
+        delete_btn.add_css_class("flat");
+        delete_btn.set_tooltip_text(Some("Delete prompt"));
 
-            let state_c = state.clone();
-            let container_c = container.clone();
-            let prompt_id = prompt.id.clone();
+        let state_c = state.clone();
+        let container_c = container.clone();
+        let prompt_id = prompt.id.clone();
 
-            delete_btn.connect_clicked(move |btn| {
-                let dialog = adw::MessageDialog::new(
-                    btn.root()
-                        .and_then(|r| r.downcast::<gtk4::Window>().ok())
-                        .as_ref(),
-                    Some("Delete prompt?"),
-                    Some("This cannot be undone."),
-                );
-                dialog.add_response("cancel", "Cancel");
-                dialog.add_response("delete", "Delete");
-                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        delete_btn.connect_clicked(move |btn| {
+            let dialog = adw::MessageDialog::new(
+                btn.root()
+                    .and_then(|r| r.downcast::<gtk4::Window>().ok())
+                    .as_ref(),
+                Some("Delete prompt?"),
+                Some("This cannot be undone."),
+            );
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("delete", "Delete");
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
 
-                let state_cc = state_c.clone();
-                let container_cc = container_c.clone();
-                let id = prompt_id.clone();
+            let state_cc = state_c.clone();
+            let container_cc = container_c.clone();
+            let id = prompt_id.clone();
 
-                dialog.connect_response(None, move |d, response| {
-                    if response == "delete" {
-                        state_cc.borrow_mut().remove_prompt(&id);
-                        let _ = state_cc.borrow().save();
-                        rebuild_content(&container_cc, &state_cc);
-                    }
-                    d.close();
-                });
-
-                dialog.present();
+            dialog.connect_response(None, move |d, response| {
+                if response == "delete" {
+                    state_cc.borrow_mut().remove_prompt(&id);
+                    let _ = state_cc.borrow().save();
+                    rebuild_content(&container_cc, &state_cc);
+                }
+                d.close();
             });
 
-            row.add_suffix(&delete_btn);
-        }
+            dialog.present();
+        });
+
+        row.add_suffix(&delete_btn);
 
         list.append(&row);
     }
@@ -159,7 +196,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
     inner.append(&list);
 
     // Add new prompt button
-    let add_btn = Button::with_label("+ Add New Prompt");
+    let add_btn = Button::with_label("Add Prompt");
     add_btn.add_css_class("suggested-action");
     add_btn.set_margin_top(8);
 
