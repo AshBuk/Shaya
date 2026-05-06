@@ -108,14 +108,9 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
 
     // Welcome page (shown when no messages)
     let welcome_page = adw::StatusPage::new();
-    // Use embedded Shaya logo
-    let logo_data = include_bytes!("../../../../icons/shaya.png");
-    let tmp = std::env::temp_dir().join("shaya-logo.png");
-    if std::fs::write(&tmp, logo_data).is_ok() {
-        let file = gtk4::gio::File::for_path(&tmp);
-        if let Ok(texture) = gtk4::gdk::Texture::from_file(&file) {
-            welcome_page.set_paintable(Some(&texture));
-        }
+    let logo_bytes = gtk4::glib::Bytes::from_static(include_bytes!("../../../../icons/shaya.png"));
+    if let Ok(texture) = gtk4::gdk::Texture::from_bytes(&logo_bytes) {
+        welcome_page.set_paintable(Some(&texture));
     }
     welcome_page.set_title("Shaya");
     welcome_page.set_description(Some(

@@ -20,7 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 # GTK4 + Adwaita (UI)
-gtk4 = "0.10"
+gtk4 = { version = "0.10", features = ["v4_6"] }
 libadwaita = { version = "0.8", features = ["v1_5"] }
 gtk4-layer-shell = "0.7"
 
