@@ -57,32 +57,38 @@ pub fn build(
     header
 }
 
-/// Build navigation buttons (💬 📋 📝 📜 ⚙️ ⏺)
+/// Build navigation buttons
 fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
     let nav = GtkBox::new(Orientation::Horizontal, 2);
     nav.add_css_class("linked");
 
-    let chat_btn = ToggleButton::with_label("💬");
+    let chat_btn = ToggleButton::new();
+    chat_btn.set_icon_name("go-home-symbolic");
     chat_btn.set_tooltip_text(Some("Chat"));
     chat_btn.set_active(true);
 
-    let cheatsheets_btn = ToggleButton::with_label("📋");
+    let cheatsheets_btn = ToggleButton::new();
+    cheatsheets_btn.set_icon_name("accessories-text-editor-symbolic");
     cheatsheets_btn.set_tooltip_text(Some("Cheatsheets"));
     cheatsheets_btn.set_group(Some(&chat_btn));
 
-    let prompts_btn = ToggleButton::with_label("📝");
+    let prompts_btn = ToggleButton::new();
+    prompts_btn.set_icon_name("document-edit-symbolic");
     prompts_btn.set_tooltip_text(Some("Prompts"));
     prompts_btn.set_group(Some(&chat_btn));
 
-    let history_btn = ToggleButton::with_label("📜");
+    let history_btn = ToggleButton::new();
+    history_btn.set_icon_name("document-open-recent-symbolic");
     history_btn.set_tooltip_text(Some("History"));
     history_btn.set_group(Some(&chat_btn));
 
-    let settings_btn = ToggleButton::with_label("⚙️");
+    let settings_btn = ToggleButton::new();
+    settings_btn.set_icon_name("emblem-system-symbolic");
     settings_btn.set_tooltip_text(Some("Settings"));
     settings_btn.set_group(Some(&chat_btn));
 
-    let meetings_btn = ToggleButton::with_label("⏺");
+    let meetings_btn = ToggleButton::new();
+    meetings_btn.set_icon_name("media-record-symbolic");
     meetings_btn.set_tooltip_text(Some("Meetings"));
     meetings_btn.set_group(Some(&chat_btn));
 

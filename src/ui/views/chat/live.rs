@@ -632,8 +632,16 @@ fn update_transcript_preview(ctx: &LiveContext, session: &LiveSession) {
 }
 
 fn set_live_buttons(ctx: &LiveContext, active: bool) {
-    ctx.live_btn
-        .set_label(if active { "⏹\u{fe0f}" } else { "📡" });
+    ctx.live_btn.set_icon_name(if active {
+        "media-playback-stop-symbolic"
+    } else {
+        "network-wireless-symbolic"
+    });
+    if active {
+        ctx.live_btn.add_css_class("destructive-action");
+    } else {
+        ctx.live_btn.remove_css_class("destructive-action");
+    }
     ctx.reply_btn.set_sensitive(active);
     ctx.audio_btn.set_sensitive(!active);
     ctx.listen_btn.set_sensitive(!active);

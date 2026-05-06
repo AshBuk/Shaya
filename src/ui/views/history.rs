@@ -58,7 +58,7 @@ fn rebuild_content(
     if state_ref.history.is_empty() {
         // Empty state (wrapped in scroll for resize)
         let status = adw::StatusPage::new();
-        status.set_icon_name(Some("chat-symbolic"));
+        status.set_icon_name(Some("document-open-recent-symbolic"));
         status.set_title("No Conversations Yet");
         status.set_description(Some("Start a chat and save it to see history here"));
 

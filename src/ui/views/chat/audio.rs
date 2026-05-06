@@ -25,7 +25,8 @@ pub fn handle_audio_click(
     entry: &Entry,
 ) {
     if recorder.borrow().is_recording() {
-        audio_btn.set_label("🎤");
+        audio_btn.set_icon_name("audio-input-microphone-symbolic");
+        audio_btn.remove_css_class("destructive-action");
 
         let audio_path = match recorder.borrow_mut().stop() {
             Ok(path) => path,
@@ -40,8 +41,9 @@ pub fn handle_audio_click(
     } else {
         match recorder.borrow_mut().start() {
             Ok(()) => {
-                audio_btn.set_label("⏹️");
-                status_label.set_text("🔴 Recording...");
+                audio_btn.set_icon_name("media-playback-stop-symbolic");
+                audio_btn.add_css_class("destructive-action");
+                status_label.set_text("Recording...");
                 status_label.set_visible(true);
             }
             Err(e) => {
@@ -61,7 +63,8 @@ pub fn handle_listen_click(
     entry: &Entry,
 ) {
     if listener.borrow().is_listening() {
-        listen_btn.set_label("🎧");
+        listen_btn.set_icon_name("audio-volume-high-symbolic");
+        listen_btn.remove_css_class("destructive-action");
 
         let audio_path = match listener.borrow_mut().stop() {
             Ok(path) => path,
@@ -76,8 +79,9 @@ pub fn handle_listen_click(
     } else {
         match listener.borrow_mut().start() {
             Ok(()) => {
-                listen_btn.set_label("⏹️");
-                status_label.set_text("🎧 Listening...");
+                listen_btn.set_icon_name("media-playback-stop-symbolic");
+                listen_btn.add_css_class("destructive-action");
+                status_label.set_text("Listening...");
                 status_label.set_visible(true);
             }
             Err(e) => {
