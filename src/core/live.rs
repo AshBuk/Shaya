@@ -4,15 +4,11 @@
 //
 // https://github.com/AshBuk/Shaya
 
-//! Live Assistant runtime model and session persistence.
+//! Live Assistant runtime model.
 
-use crate::core::state::{AiProvider, Message, Role, SttProvider};
-use anyhow::Result;
+use crate::core::state::{Message, Role};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
 
 pub const NO_SUGGESTION: &str = "NO_SUGGESTION";
 pub const MAX_PENDING_CHUNKS: u64 = 6;
@@ -93,21 +89,9 @@ impl LiveTranscriptBuffer {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LiveSessionMetadata {
-    pub id: String,
-    pub started_at: DateTime<Utc>,
-    pub ended_at: Option<DateTime<Utc>>,
-    pub chunk_secs: u64,
-    pub ai_provider: AiProvider,
-    pub ai_model: String,
-    pub stt_provider: SttProvider,
-    pub stt_model: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct LiveSession {
-    pub metadata: LiveSessionMetadata,
+    pub chunk_secs: u64,
     pub transcript: LiveTranscriptBuffer,
     pub last_evaluated_seq: u64,
     pub in_flight: Option<LiveRequestRange>,
@@ -120,25 +104,9 @@ pub struct LiveSession {
 }
 
 impl LiveSession {
-    pub fn new(
-        chunk_secs: u64,
-        ai_provider: AiProvider,
-        ai_model: String,
-        stt_provider: SttProvider,
-        stt_model: String,
-    ) -> Self {
-        let now = Utc::now();
+    pub fn new(chunk_secs: u64) -> Self {
         Self {
-            metadata: LiveSessionMetadata {
-                id: format!("session-{}", now.timestamp_millis()),
-                started_at: now,
-                ended_at: None,
-                chunk_secs,
-                ai_provider,
-                ai_model,
-                stt_provider,
-                stt_model,
-            },
+            chunk_secs,
             transcript: LiveTranscriptBuffer::default(),
             last_evaluated_seq: 0,
             in_flight: None,
@@ -256,71 +224,12 @@ pub fn is_no_suggestion(response: &str) -> bool {
     response.trim().starts_with(NO_SUGGESTION)
 }
 
-pub struct LiveSessionManager;
-
-impl LiveSessionManager {
-    pub fn base_dir() -> PathBuf {
-        dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("shaya")
-            .join("live")
-    }
-
-    pub fn session_dir(session_id: &str) -> PathBuf {
-        Self::base_dir().join(session_id)
-    }
-
-    pub fn chunks_dir(session_id: &str) -> PathBuf {
-        Self::session_dir(session_id).join("chunks")
-    }
-
-    pub fn save_metadata(metadata: &LiveSessionMetadata) -> Result<()> {
-        let dir = Self::session_dir(&metadata.id);
-        fs::create_dir_all(&dir)?;
-        let path = dir.join("metadata.json");
-        fs::write(path, serde_json::to_string_pretty(metadata)?)?;
-        Ok(())
-    }
-
-    pub fn append_transcript(session_id: &str, segment: &TranscriptSegment) -> Result<()> {
-        let dir = Self::session_dir(session_id);
-        fs::create_dir_all(&dir)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("transcript.txt"))?;
-        writeln!(
-            file,
-            "[{} {} - {}] {}",
-            segment.seq,
-            segment.started_at.to_rfc3339(),
-            segment.ended_at.to_rfc3339(),
-            segment.text.trim()
-        )?;
-        Ok(())
-    }
-
-    pub fn cleanup_chunks(session_id: &str) -> Result<()> {
-        let dir = Self::chunks_dir(session_id);
-        if dir.exists() {
-            fs::remove_dir_all(dir)?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn session() -> LiveSession {
-        LiveSession::new(
-            4,
-            AiProvider::Groq,
-            "model".to_string(),
-            SttProvider::Groq,
-            "stt".to_string(),
-        )
+        LiveSession::new(4)
     }
 
     fn segment(seq: u64, text: &str) -> TranscriptSegment {

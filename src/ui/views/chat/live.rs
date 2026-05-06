@@ -10,8 +10,8 @@ use super::messaging;
 use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::live::{
-    is_no_suggestion, live_transcript_message, LiveRequestRange, LiveSession, LiveSessionManager,
-    LIVE_SYSTEM_PROMPT, MAX_PENDING_CHUNKS,
+    is_no_suggestion, live_transcript_message, LiveRequestRange, LiveSession, LIVE_SYSTEM_PROMPT,
+    MAX_PENDING_CHUNKS,
 };
 use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
 use chrono::{DateTime, Utc};
@@ -48,12 +48,14 @@ pub(super) struct LiveRuntime {
     recorder: Option<ListenRecorder>,
     active_chunk: Option<ActiveChunk>,
     next_seq: u64,
+    run_id: u64,
 }
 
 #[derive(Clone, Copy)]
 struct ActiveChunk {
     seq: u64,
     started_at: DateTime<Utc>,
+    run_id: u64,
 }
 
 enum ChunkResult {
@@ -85,7 +87,7 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         return;
     }
 
-    let settings = {
+    let chunk_secs = {
         let state = ctx.state.borrow();
         if state.settings.active_stt_key().is_empty() {
             show_status(&ctx.status_label, "Set STT API key in Settings");
@@ -95,29 +97,16 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             show_status(&ctx.status_label, "Set AI API key in Settings");
             return;
         }
-        (
-            state.settings.effective_live_chunk_secs(),
-            state.settings.provider,
-            state.settings.active_model().to_string(),
-            state.settings.stt_provider,
-            state.settings.active_stt_model().to_string(),
-        )
+        state.settings.effective_live_chunk_secs()
     };
 
-    let session = LiveSession::new(settings.0, settings.1, settings.2, settings.3, settings.4);
-    if let Err(e) = LiveSessionManager::save_metadata(&session.metadata) {
-        show_status(&ctx.status_label, &format!("Live save failed: {}", e));
-        return;
-    }
-    if let Err(e) = fs::create_dir_all(LiveSessionManager::chunks_dir(&session.metadata.id)) {
-        show_status(&ctx.status_label, &format!("Live setup failed: {}", e));
-        return;
-    }
+    let session = LiveSession::new(chunk_secs);
 
     {
         let mut live = runtime.borrow_mut();
         live.session = Some(session);
         live.next_seq = 1;
+        live.run_id = Utc::now().timestamp_micros() as u64;
     }
 
     set_live_buttons(&ctx, true);
@@ -126,11 +115,12 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 }
 
 fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
-    let mut session_to_save = None;
     {
         let mut live = runtime.borrow_mut();
         if let Some(mut recorder) = live.recorder.take() {
-            let _ = recorder.stop();
+            if let Ok(path) = recorder.stop() {
+                let _ = fs::remove_file(path);
+            }
         }
         live.active_chunk = None;
         let fallback_seq = live.next_seq.saturating_sub(1);
@@ -139,14 +129,7 @@ fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
                 .pending_to_seq
                 .or_else(|| (fallback_seq > 0).then_some(fallback_seq));
             close_pending_session(&ctx, &mut session, closing_seq);
-            session.metadata.ended_at = Some(Utc::now());
-            session_to_save = Some(session.metadata);
         }
-    }
-
-    if let Some(metadata) = session_to_save {
-        let _ = LiveSessionManager::save_metadata(&metadata);
-        let _ = LiveSessionManager::cleanup_chunks(&metadata.id);
     }
 
     set_live_buttons(&ctx, false);
@@ -155,19 +138,30 @@ fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 }
 
 fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
-    let (seq, session_id, chunk_secs) = {
+    let (seq, run_id, chunk_secs) = {
         let mut live = runtime.borrow_mut();
         let Some(session) = live.session.as_ref() else {
             return;
         };
-        let session_id = session.metadata.id.clone();
-        let chunk_secs = session.metadata.chunk_secs;
+        let run_id = live.run_id;
+        let chunk_secs = session.chunk_secs;
         let seq = live.next_seq;
         live.next_seq += 1;
-        (seq, session_id, chunk_secs)
+        (seq, run_id, chunk_secs)
     };
 
-    let path = LiveSessionManager::chunks_dir(&session_id).join(format!("chunk_{:06}.wav", seq));
+    let temp_dir = std::env::temp_dir().join("shaya-live");
+    if let Err(e) = fs::create_dir_all(&temp_dir) {
+        show_status(&ctx.status_label, &format!("Live setup failed: {}", e));
+        stop(ctx, runtime);
+        return;
+    }
+    let path = temp_dir.join(format!(
+        "chunk_{}_{}_{:06}.wav",
+        std::process::id(),
+        run_id,
+        seq
+    ));
     let mut recorder = ListenRecorder::with_path(path);
     if let Err(e) = recorder.start() {
         show_status(&ctx.status_label, &format!("Live capture failed: {}", e));
@@ -179,10 +173,14 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     {
         let mut live = runtime.borrow_mut();
         live.recorder = Some(recorder);
-        live.active_chunk = Some(ActiveChunk { seq, started_at });
+        live.active_chunk = Some(ActiveChunk {
+            seq,
+            started_at,
+            run_id,
+        });
     }
     glib::timeout_add_local_once(Duration::from_secs(chunk_secs), move || {
-        finish_chunk(ctx, runtime, seq, started_at);
+        finish_chunk(ctx, runtime, seq, started_at, run_id);
     });
 }
 
@@ -191,10 +189,15 @@ fn finish_chunk(
     runtime: Rc<RefCell<LiveRuntime>>,
     seq: u64,
     started_at: DateTime<Utc>,
+    run_id: u64,
 ) {
     let audio_path = {
         let mut live = runtime.borrow_mut();
-        if live.active_chunk.is_none_or(|chunk| chunk.seq != seq) {
+        if live
+            .active_chunk
+            .as_ref()
+            .is_none_or(|chunk| chunk.seq != seq || chunk.run_id != run_id)
+        {
             return;
         }
         live.active_chunk = None;
@@ -204,7 +207,7 @@ fn finish_chunk(
         match recorder.stop() {
             Ok(path) => path,
             Err(e) => {
-                let active = live.is_active();
+                let active = live.session.is_some() && live.run_id == run_id;
                 drop(live);
                 if active {
                     show_status(&ctx.status_label, &format!("Live chunk skipped: {}", e));
@@ -215,10 +218,20 @@ fn finish_chunk(
         }
     };
 
-    if runtime.borrow().is_active() {
+    if is_active_run(&runtime, run_id) {
         start_next_chunk(ctx.clone(), runtime.clone());
     }
-    process_chunk(ctx, runtime, seq, started_at, audio_path, false);
+    process_chunk(
+        ctx,
+        runtime,
+        ActiveChunk {
+            seq,
+            started_at,
+            run_id,
+        },
+        audio_path,
+        false,
+    );
 }
 
 fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
@@ -238,7 +251,6 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         }
         (live.recorder.take(), live.active_chunk.take())
     };
-
     let (Some(mut recorder), Some(chunk)) = (recorder, chunk) else {
         finish_force_reply(ctx, runtime, None);
         return;
@@ -248,7 +260,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 
     match stopped {
         Ok(audio_path) => {
-            process_chunk(ctx, runtime, chunk.seq, chunk.started_at, audio_path, true);
+            process_chunk(ctx, runtime, chunk, audio_path, true);
         }
         Err(e) => {
             show_status(&ctx.status_label, &format!("Live flush skipped: {}", e));
@@ -260,11 +272,16 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 fn process_chunk(
     ctx: LiveContext,
     runtime: Rc<RefCell<LiveRuntime>>,
-    seq: u64,
-    started_at: DateTime<Utc>,
+    chunk: ActiveChunk,
     audio_path: PathBuf,
     force_reply_after: bool,
 ) {
+    let ActiveChunk {
+        seq,
+        started_at,
+        run_id,
+    } = chunk;
+
     let (stt_provider, stt_key, stt_model) = {
         let state = ctx.state.borrow();
         (
@@ -296,6 +313,10 @@ fn process_chunk(
             }
         })
         .await;
+
+        if !is_active_run(&runtime, run_id) {
+            return;
+        }
 
         match result {
             Ok(Ok(ChunkResult::Silent)) => {
@@ -416,9 +437,6 @@ fn close_pending_session(
     };
 
     session.transcript.append(segment.clone());
-    if let Err(e) = LiveSessionManager::append_transcript(&session.metadata.id, &segment) {
-        tracing::warn!("Failed to save live transcript: {}", e);
-    }
     tracing::info!(
         "closed utterance seq={} chunks={}-{} len={}",
         segment.seq,
@@ -431,7 +449,7 @@ fn close_pending_session(
 }
 
 fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: bool) {
-    let (range, transcript_text) = {
+    let (run_id, range, transcript_text) = {
         let mut live = runtime.borrow_mut();
         let Some(session) = live.session.as_mut() else {
             show_status(&ctx.status_label, "Live is not active");
@@ -449,7 +467,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         };
         let transcript_text = session.transcript.compact_text(range);
         session.in_flight = Some(range);
-        (range, transcript_text)
+        (live.run_id, range, transcript_text)
     };
 
     let (provider, api_key, model, system_prompt, mut messages, cache_up_to_message) = {
@@ -486,6 +504,10 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
                 .map_err(|e| e.to_string())
         })
         .await;
+
+        if !is_active_run(&runtime, run_id) {
+            return;
+        }
 
         match result {
             Ok(Ok(response)) => apply_live_response(ctx, runtime, range, pending_message, response),
@@ -545,6 +567,11 @@ fn clear_in_flight(runtime: &Rc<RefCell<LiveRuntime>>, range: LiveRequestRange) 
             session.in_flight = None;
         }
     }
+}
+
+fn is_active_run(runtime: &Rc<RefCell<LiveRuntime>>, run_id: u64) -> bool {
+    let live = runtime.borrow();
+    live.session.is_some() && live.run_id == run_id
 }
 
 fn live_system_prompt(state: &AppState) -> String {
