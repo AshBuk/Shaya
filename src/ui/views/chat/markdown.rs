@@ -322,98 +322,37 @@ impl<'a> Parser<'a> {
 
     /// Check if line is a horizontal rule
     fn is_horizontal_rule(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        if trimmed.len() < 3 {
-            return false;
-        }
-        let chars: Vec<char> = trimmed.chars().collect();
-        let first = chars[0];
-        (first == '-' || first == '*' || first == '_')
-            && chars.iter().all(|&c| c == first || c == ' ')
-            && chars.iter().filter(|&&c| c == first).count() >= 3
+        is_horizontal_rule(line)
     }
 
     /// Parse bullet list line (- item, * item, + item)
     fn parse_bullet_line<'b>(&self, line: &'b str) -> Option<(usize, &'b str)> {
-        let indent = line.len() - line.trim_start().len();
-        let trimmed = line.trim_start();
-        let content = if let Some(rest) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("+ "))
-        {
-            rest
-        } else if trimmed.starts_with("* ") && !trimmed.starts_with("**") {
-            &trimmed[2..]
-        } else {
-            return None;
-        };
-        Some(((indent / 2).min(2), content))
+        parse_bullet_line(line)
     }
 
     /// Parse numbered list line (1. item, 2. item)
     fn parse_numbered_line<'b>(&self, line: &'b str) -> Option<(usize, &'b str, &'b str)> {
-        let indent = line.len() - line.trim_start().len();
-        let trimmed = line.trim_start();
-        let dot_pos = trimmed.find(". ")?;
-        let num = &trimmed[..dot_pos];
-        if num.chars().all(|c| c.is_ascii_digit()) && !num.is_empty() {
-            Some(((indent / 2).min(2), num, &trimmed[dot_pos + 2..]))
-        } else {
-            None
-        }
+        parse_numbered_line(line)
     }
 
     /// Parse code block, returns next line index
     fn parse_code_block(&mut self, lines: &[&str], start: usize) -> usize {
-        // Skip opening ``` (possibly with language)
-        let mut i = start + 1;
-        let mut code_lines = Vec::new();
-
-        // Collect lines until closing ```
-        while i < lines.len() {
-            if lines[i].starts_with("```") {
-                break;
-            }
-            code_lines.push(lines[i]);
-            i += 1;
-        }
-
         // Insert code block
         if start > 0 {
             self.insert_plain("\n");
         }
 
-        let code = code_lines.join("\n");
+        let (code, next) = collect_code_block(lines, start);
         if !code.is_empty() {
             self.insert_with_tag(&code, "code-block");
         }
 
-        // Return index after closing ```
-        if i < lines.len() && lines[i].starts_with("```") {
-            i + 1
-        } else {
-            i
-        }
+        next
     }
 
     /// Parse header line, returns (text, tag) if header found
     fn parse_header_line(&self, line: &str) -> Option<Header> {
-        // Check in order: ### before ## before # (longest prefix first)
-        [
-            ("###### ", "h6"),
-            ("##### ", "h5"),
-            ("#### ", "h4"),
-            ("### ", "h3"),
-            ("## ", "h2"),
-            ("# ", "h1"),
-        ]
-        .iter()
-        .find_map(|(prefix, tag)| {
-            line.strip_prefix(prefix).map(|text| Header {
-                text: text.to_string(),
-                tag,
-            })
-        })
+        parse_header_line(line)
     }
 
     /// Parse inline formatting: bold, italic, inline code, strikethrough, links
@@ -654,18 +593,7 @@ impl<'a> Parser<'a> {
 
     /// Check if line is a table row
     fn is_table_line(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        trimmed.starts_with('|') && trimmed.matches('|').count() >= 3
-    }
-
-    /// Check if line is a table separator (|---|---|)
-    fn is_table_separator(&self, line: &str) -> bool {
-        let trimmed = line.trim();
-        trimmed.starts_with('|')
-            && trimmed.contains('-')
-            && trimmed
-                .chars()
-                .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
+        is_table_line(line)
     }
 
     /// Parse table block, returns next line index
@@ -678,56 +606,16 @@ impl<'a> Parser<'a> {
             i += 1;
         }
 
-        // Parse cells, skip separator rows
-        let rows: Vec<Vec<String>> = raw_rows
-            .iter()
-            .filter(|line| !self.is_table_separator(line))
-            .map(|line| {
-                line.split('|')
-                    .map(|cell| cell.trim().to_string())
-                    .filter(|cell| !cell.is_empty())
-                    .collect()
-            })
-            .collect();
-
-        if rows.is_empty() {
+        let formatted_rows = format_table_rows(&raw_rows);
+        if formatted_rows.is_empty() {
             return i;
         }
 
-        let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-        let mut col_widths = vec![0usize; num_cols];
-        for row in &rows {
-            for (j, cell) in row.iter().enumerate() {
-                if j < num_cols {
-                    col_widths[j] = col_widths[j].max(cell.chars().count());
-                }
-            }
-        }
-
-        for (ri, row) in rows.iter().enumerate() {
+        for (ri, row) in formatted_rows.iter().enumerate() {
             if ri > 0 || start > 0 {
                 self.insert_plain("\n");
             }
-            let formatted: String = (0..num_cols)
-                .map(|j| {
-                    let cell = row.get(j).map(|s| s.as_str()).unwrap_or("");
-                    let pad = col_widths[j].saturating_sub(cell.chars().count());
-                    format!("{}{}", cell, " ".repeat(pad))
-                })
-                .collect::<Vec<_>>()
-                .join(" │ ");
-            self.insert_with_tag(&formatted, "table");
-
-            // Separator after header row
-            if ri == 0 && rows.len() > 1 {
-                self.insert_plain("\n");
-                let sep: String = col_widths
-                    .iter()
-                    .map(|&w| "─".repeat(w))
-                    .collect::<Vec<_>>()
-                    .join("─┼─");
-                self.insert_with_tag(&sep, "table");
-            }
+            self.insert_with_tag(row, "table");
         }
 
         i
@@ -764,4 +652,187 @@ impl<'a> Parser<'a> {
 struct Header {
     text: String,
     tag: &'static str,
+}
+
+fn is_horizontal_rule(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.len() < 3 {
+        return false;
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    let first = chars[0];
+    (first == '-' || first == '*' || first == '_')
+        && chars.iter().all(|&c| c == first || c == ' ')
+        && chars.iter().filter(|&&c| c == first).count() >= 3
+}
+
+fn parse_bullet_line(line: &str) -> Option<(usize, &str)> {
+    let indent = line.len() - line.trim_start().len();
+    let trimmed = line.trim_start();
+    let content = if let Some(rest) = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("+ "))
+    {
+        rest
+    } else if trimmed.starts_with("* ") && !trimmed.starts_with("**") {
+        &trimmed[2..]
+    } else {
+        return None;
+    };
+    Some(((indent / 2).min(2), content))
+}
+
+fn parse_numbered_line(line: &str) -> Option<(usize, &str, &str)> {
+    let indent = line.len() - line.trim_start().len();
+    let trimmed = line.trim_start();
+    let dot_pos = trimmed.find(". ")?;
+    let num = &trimmed[..dot_pos];
+    if num.chars().all(|c| c.is_ascii_digit()) && !num.is_empty() {
+        Some(((indent / 2).min(2), num, &trimmed[dot_pos + 2..]))
+    } else {
+        None
+    }
+}
+
+fn collect_code_block(lines: &[&str], start: usize) -> (String, usize) {
+    let mut i = start + 1;
+    let mut code_lines = Vec::new();
+
+    while i < lines.len() {
+        if lines[i].starts_with("```") {
+            break;
+        }
+        code_lines.push(lines[i]);
+        i += 1;
+    }
+
+    let next = if i < lines.len() && lines[i].starts_with("```") {
+        i + 1
+    } else {
+        i
+    };
+
+    (code_lines.join("\n"), next)
+}
+
+fn parse_header_line(line: &str) -> Option<Header> {
+    [
+        ("###### ", "h6"),
+        ("##### ", "h5"),
+        ("#### ", "h4"),
+        ("### ", "h3"),
+        ("## ", "h2"),
+        ("# ", "h1"),
+    ]
+    .iter()
+    .find_map(|(prefix, tag)| {
+        line.strip_prefix(prefix).map(|text| Header {
+            text: text.to_string(),
+            tag,
+        })
+    })
+}
+
+fn is_table_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.matches('|').count() >= 3
+}
+
+fn is_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|')
+        && trimmed.contains('-')
+        && trimmed
+            .chars()
+            .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
+}
+
+fn format_table_rows(raw_rows: &[&str]) -> Vec<String> {
+    let rows: Vec<Vec<String>> = raw_rows
+        .iter()
+        .filter(|line| !is_table_separator(line))
+        .map(|line| {
+            line.split('|')
+                .map(|cell| cell.trim().to_string())
+                .filter(|cell| !cell.is_empty())
+                .collect()
+        })
+        .collect();
+
+    if rows.is_empty() {
+        return Vec::new();
+    }
+
+    let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut col_widths = vec![0usize; num_cols];
+    for row in &rows {
+        for (j, cell) in row.iter().enumerate() {
+            if j < num_cols {
+                col_widths[j] = col_widths[j].max(cell.chars().count());
+            }
+        }
+    }
+
+    let mut formatted = Vec::new();
+    for (ri, row) in rows.iter().enumerate() {
+        formatted.push(
+            (0..num_cols)
+                .map(|j| {
+                    let cell = row.get(j).map(|s| s.as_str()).unwrap_or("");
+                    let pad = col_widths[j].saturating_sub(cell.chars().count());
+                    format!("{}{}", cell, " ".repeat(pad))
+                })
+                .collect::<Vec<_>>()
+                .join(" │ "),
+        );
+
+        if ri == 0 && rows.len() > 1 {
+            formatted.push(
+                col_widths
+                    .iter()
+                    .map(|&w| "─".repeat(w))
+                    .collect::<Vec<_>>()
+                    .join("─┼─"),
+            );
+        }
+    }
+
+    formatted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_markdown_block_markers() {
+        let header = parse_header_line("#### Title").map(|h| (h.text, h.tag));
+
+        assert_eq!(header, Some(("Title".to_string(), "h4")));
+        assert!(is_horizontal_rule("---"));
+        assert!(!is_horizontal_rule("--"));
+    }
+
+    #[test]
+    fn parses_nested_lists() {
+        assert_eq!(parse_bullet_line("- one"), Some((0, "one")));
+        assert_eq!(parse_bullet_line("  - two"), Some((1, "two")));
+        assert_eq!(parse_numbered_line("    1. deep"), Some((2, "1", "deep")));
+    }
+
+    #[test]
+    fn collects_code_blocks_without_fence_markers() {
+        let lines = ["```rust", "fn main() {}", "```", "After"];
+        let (code, next) = collect_code_block(&lines, 0);
+
+        assert_eq!(code, "fn main() {}");
+        assert_eq!(next, 3);
+    }
+
+    #[test]
+    fn formats_tables_as_aligned_text() {
+        let rows = format_table_rows(&["| Name | Value |", "| --- | --- |", "| A | 1 |"]);
+
+        assert_eq!(rows, vec!["Name │ Value", "─────┼──────", "A    │ 1    "]);
+    }
 }
