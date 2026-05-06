@@ -93,7 +93,8 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, paned_pos:
     list.set_margin_end(12);
 
     // Preview area (shared, updated on selection)
-    let tag_table = chat::markdown::create_tag_table();
+    let is_dark = state.borrow().settings.dark_mode;
+    let tag_table = chat::markdown::create_tag_table(is_dark);
     let preview_buffer = gtk4::TextBuffer::new(Some(&tag_table));
     let preview_view = TextView::builder()
         .buffer(&preview_buffer)

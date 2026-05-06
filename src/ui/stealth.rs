@@ -16,7 +16,10 @@ use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio::ApplicationFlags;
-use gtk4::{gdk, glib, ApplicationWindow, Box as GtkBox, GestureDrag, Label, Orientation, Overlay};
+use gtk4::{
+    gdk, glib, ApplicationWindow, Box as GtkBox, CssProvider, GestureDrag, Label, Orientation,
+    Overlay,
+};
 use libadwaita as adw;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -78,6 +81,20 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Build the main UI
 fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
+    // Load custom CSS
+    let css = CssProvider::new();
+    css.load_from_data(
+        ".header-bar { border-bottom: 1px solid alpha(currentColor, 0.08); }
+         .control-panel { border-top: 1px solid alpha(currentColor, 0.08); }",
+    );
+    if let Some(display) = gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &css,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+
     let (window_width, window_height) = {
         let s = state.borrow();
         (s.settings.window_width, s.settings.window_height)
@@ -149,7 +166,7 @@ fn build_view_stack(
     // Chat view
     let (chat, chat_shared) = views::chat::build_content(state.clone());
     stack.add_titled(&chat, Some("chat"), "Chat");
-    stack.page(&chat).set_icon_name(Some("chat-symbolic"));
+    stack.page(&chat).set_icon_name(Some("go-home-symbolic"));
 
     // Cheatsheets view
     let cheatsheets = views::cheatsheets::build(state.clone());

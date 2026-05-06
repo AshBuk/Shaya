@@ -62,12 +62,12 @@ fn build_controls(
     // Row: record button + mic toggle
     let row = GtkBox::new(Orientation::Horizontal, 8);
 
-    let record_btn = Button::with_label("⏺ Start Recording");
+    let record_btn = Button::with_label("Start Recording");
     record_btn.add_css_class("suggested-action");
     record_btn.set_hexpand(true);
 
     let mic_toggle = adw::SwitchRow::new();
-    mic_toggle.set_title("🎤 Mic");
+    mic_toggle.set_title("Microphone");
     mic_toggle.set_active(state.borrow().settings.meeting_record_mic);
     mic_toggle.set_width_request(140);
 
@@ -115,7 +115,7 @@ fn build_controls(
                 id.remove();
             }
 
-            btn.set_label("⏺ Start Recording");
+            btn.set_label("Start Recording");
             btn.remove_css_class("destructive-action");
             btn.add_css_class("suggested-action");
             mic_c.set_sensitive(true);
@@ -168,7 +168,7 @@ fn build_controls(
             match MeetingRecorder::start(record_mic) {
                 Ok(rec) => {
                     *recorder_c.borrow_mut() = Some(rec);
-                    btn.set_label("⏹ Stop Recording");
+                    btn.set_label("Stop Recording");
                     btn.remove_css_class("suggested-action");
                     btn.add_css_class("destructive-action");
                     mic_c.set_sensitive(false);
@@ -548,7 +548,10 @@ fn show_transcript_dialog(parent: Option<&gtk4::Window>, title: &str, content: &
     let header = adw::HeaderBar::new();
     toolbar_view.add_top_bar(&header);
 
-    let tag_table = markdown::create_tag_table();
+    let is_dark = gtk4::gdk::Display::default()
+        .map(|d| libadwaita::StyleManager::for_display(&d).is_dark())
+        .unwrap_or(true);
+    let tag_table = markdown::create_tag_table(is_dark);
     let buffer = gtk4::TextBuffer::new(Some(&tag_table));
     markdown::render(&buffer, content);
 

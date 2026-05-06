@@ -210,14 +210,28 @@ pub fn send_message(ctx: &ChatContext) {
     });
 }
 
+/// Toggle between welcome page and chat content via parent Stack.
+fn toggle_chat_stack(chat_view: &TextView, show_chat: bool) {
+    // chat_view -> ScrolledWindow -> Stack
+    if let Some(scroll) = chat_view.parent() {
+        if let Some(stack) = scroll
+            .parent()
+            .and_then(|p| p.downcast::<gtk4::Stack>().ok())
+        {
+            stack.set_visible_child_name(if show_chat { "chat" } else { "welcome" });
+        }
+    }
+}
+
 /// Update chat display with current messages (with markdown rendering)
 pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
     let buffer = chat_view.buffer();
+    let has_messages = !state.current_messages.is_empty();
 
-    if state.current_messages.is_empty() {
-        buffer.set_text(
-            "Shaya AI 🤫\n\n💬 Type a message\n🎤 Record your voice\n🎧 Listen (system audio)\n🖱️ Select area\n📷 Full screenshot",
-        );
+    toggle_chat_stack(chat_view, has_messages);
+
+    if !has_messages {
+        buffer.set_text("");
         return;
     }
 

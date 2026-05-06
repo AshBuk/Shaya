@@ -71,8 +71,19 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
 
     // Chat display (read-only, but allows text selection)
     // Use TextBuffer with markdown tag table for formatting
-    let tag_table = markdown::create_tag_table();
+    let is_dark = state.borrow().settings.dark_mode;
+    let tag_table = markdown::create_tag_table(is_dark);
     let buffer = TextBuffer::new(Some(&tag_table));
+
+    // Update code tag colors when theme changes at runtime
+    if let Some(display) = gtk4::gdk::Display::default() {
+        let sm = adw::StyleManager::for_display(&display);
+        let tt = tag_table.clone();
+        sm.connect_dark_notify(move |sm| {
+            markdown::update_theme(&tt, sm.is_dark());
+        });
+    }
+
     let chat_view = TextView::with_buffer(&buffer);
     chat_view.set_editable(false);
     chat_view.set_cursor_visible(false);
@@ -95,7 +106,31 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
         .child(&chat_view)
         .build();
 
-    vbox.append(&scroll);
+    // Welcome page (shown when no messages)
+    let welcome_page = adw::StatusPage::new();
+    // Use embedded Shaya logo
+    let logo_data = include_bytes!("../../../../icons/shaya.png");
+    let tmp = std::env::temp_dir().join("shaya-logo.png");
+    if std::fs::write(&tmp, logo_data).is_ok() {
+        let file = gtk4::gio::File::for_path(&tmp);
+        if let Ok(texture) = gtk4::gdk::Texture::from_file(&file) {
+            welcome_page.set_paintable(Some(&texture));
+        }
+    }
+    welcome_page.set_title("Shaya");
+    welcome_page.set_description(Some(
+        "A fast and quiet AI assistant for deep work\n\nType a message, record voice, or capture a screenshot",
+    ));
+
+    // Stack: toggle between welcome and chat
+    let content_stack = gtk4::Stack::new();
+    content_stack.set_vexpand(true);
+    content_stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    content_stack.set_transition_duration(150);
+    content_stack.add_named(&welcome_page, Some("welcome"));
+    content_stack.add_named(&scroll, Some("chat"));
+
+    vbox.append(&content_stack);
     messaging::update_chat_display(&chat_view, &state.borrow());
 
     // Initialize shared state
@@ -140,7 +175,7 @@ pub fn build_input(
     entry.set_hexpand(true);
     entry.set_placeholder_text(Some("Type message..."));
 
-    let send_btn = Button::with_label("↑");
+    let send_btn = Button::from_icon_name("go-up-symbolic");
     send_btn.add_css_class("suggested-action");
     send_btn.set_tooltip_text(Some("Send message"));
 
@@ -180,8 +215,7 @@ pub fn build_input(
     buttons_box.set_halign(gtk4::Align::Center);
     buttons_box.set_margin_top(4);
 
-    // 🎤 Record
-    let audio_btn = Button::with_label("🎤");
+    let audio_btn = Button::from_icon_name("audio-input-microphone-symbolic");
     audio_btn.set_tooltip_text(Some("Record and transcribe"));
     {
         let recorder_c = recorder.clone();
@@ -195,8 +229,7 @@ pub fn build_input(
         });
     }
 
-    // 🎧 Listen
-    let listen_btn = Button::with_label("🎧");
+    let listen_btn = Button::from_icon_name("audio-volume-high-symbolic");
     listen_btn.set_tooltip_text(Some("Capture system audio"));
     {
         let listener_c = listener.clone();
@@ -210,10 +243,10 @@ pub fn build_input(
         });
     }
 
-    let live_btn = Button::with_label("📡");
+    let live_btn = Button::from_icon_name("network-wireless-symbolic");
     live_btn.set_tooltip_text(Some("Start Live Assistant"));
 
-    let reply_btn = Button::with_label("🗣\u{fe0f}");
+    let reply_btn = Button::from_icon_name("mail-reply-sender-symbolic");
     reply_btn.set_tooltip_text(Some("Answer latest live transcript now"));
     reply_btn.set_sensitive(false);
 
@@ -248,8 +281,7 @@ pub fn build_input(
         });
     }
 
-    // 🖱️ Select area
-    let area_btn = Button::with_label("🖱️");
+    let area_btn = Button::from_icon_name("edit-select-all-symbolic");
     area_btn.set_tooltip_text(Some("Select area to capture"));
     {
         let image_c = attached_image.clone();
@@ -261,8 +293,7 @@ pub fn build_input(
         });
     }
 
-    // 📷 Full screenshot
-    let screenshot_btn = Button::with_label("📷");
+    let screenshot_btn = Button::from_icon_name("camera-photo-symbolic");
     screenshot_btn.set_tooltip_text(Some("Capture full screen"));
     {
         let image_c = attached_image.clone();
@@ -274,8 +305,7 @@ pub fn build_input(
         });
     }
 
-    // 💾 Save to history
-    let save_btn = Button::with_label("💾");
+    let save_btn = Button::from_icon_name("document-save-symbolic");
     save_btn.set_tooltip_text(Some("Save to history"));
     {
         let state_c = state.clone();
@@ -328,8 +358,7 @@ pub fn build_input(
         });
     }
 
-    // 🗑️ Clear (silent, no confirmation)
-    let clear_btn = Button::with_label("🗑️");
+    let clear_btn = Button::from_icon_name("user-trash-symbolic");
     clear_btn.set_tooltip_text(Some("Clear chat"));
     {
         let state_c = state.clone();
