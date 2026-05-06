@@ -12,27 +12,53 @@
 //! - Bold (**...**)
 //! - Italic (*...*)
 //! - Strikethrough (~~...~~)
-//! - Headers (#, ##, ###)
-//! - Bullet lists (-, *, +)
-//! - Numbered lists (1., 2., etc.)
+//! - Headers (#, ##, ###, ####, #####, ######)
+//! - Bullet lists (-, *, +) with nesting
+//! - Numbered lists (1., 2., etc.) with nesting
 //! - Blockquotes (> ...)
 //! - Horizontal rules (---, ***, ___)
 //! - Links [text](url) (rendered as underlined text)
+//! - Tables (| col | col |)
+//! - Combined formatting (**_bold italic_**)
 
 use gtk4::prelude::*;
 use gtk4::{TextBuffer, TextTag, TextTagTable};
 
-/// Create tag table with all markdown formatting tags
-pub fn create_tag_table() -> TextTagTable {
+/// Theme-dependent colors: (code_bg, code_fg, inline_bg, inline_fg)
+fn code_colors(is_dark: bool) -> (&'static str, &'static str, &'static str, &'static str) {
+    if is_dark {
+        ("#2d2d2d", "#d4d4d4", "#3d3d3d", "#e0e0e0")
+    } else {
+        ("#eaeaea", "#1e1e1e", "#e0e0e0", "#1e1e1e")
+    }
+}
+
+/// Update code tag colors when theme changes
+pub fn update_theme(table: &TextTagTable, is_dark: bool) {
+    let (code_bg, code_fg, inline_bg, inline_fg) = code_colors(is_dark);
+    if let Some(tag) = table.lookup("code-block") {
+        tag.set_background(Some(code_bg));
+        tag.set_foreground(Some(code_fg));
+        tag.set_paragraph_background(Some(code_bg));
+    }
+    if let Some(tag) = table.lookup("code") {
+        tag.set_background(Some(inline_bg));
+        tag.set_foreground(Some(inline_fg));
+    }
+}
+
+/// Create tag table with all markdown formatting tags (theme-aware)
+pub fn create_tag_table(is_dark: bool) -> TextTagTable {
     let table = TextTagTable::new();
 
-    // Code block: dark background, monospace, compact lines
+    let (code_bg, code_fg, inline_bg, inline_fg) = code_colors(is_dark);
+
     let code_block = TextTag::builder()
         .name("code-block")
         .family("monospace")
-        .background("#1e1e1e")
-        .foreground("#d4d4d4")
-        .paragraph_background("#1e1e1e")
+        .background(code_bg)
+        .foreground(code_fg)
+        .paragraph_background(code_bg)
         .left_margin(12)
         .right_margin(12)
         .pixels_above_lines(0)
@@ -41,12 +67,11 @@ pub fn create_tag_table() -> TextTagTable {
         .build();
     table.add(&code_block);
 
-    // Inline code: subtle background, monospace
     let code_inline = TextTag::builder()
         .name("code")
         .family("monospace")
-        .background("#3d3d3d")
-        .foreground("#e0e0e0")
+        .background(inline_bg)
+        .foreground(inline_fg)
         .build();
     table.add(&code_inline);
 
@@ -80,7 +105,7 @@ pub fn create_tag_table() -> TextTagTable {
     let blockquote = TextTag::builder()
         .name("blockquote")
         .left_margin(16)
-        .foreground("#9e9e9e")
+        .foreground(if is_dark { "#9e9e9e" } else { "#757575" })
         .style(gtk4::pango::Style::Italic)
         .pixels_above_lines(2)
         .pixels_below_lines(2)
@@ -94,7 +119,7 @@ pub fn create_tag_table() -> TextTagTable {
     // Horizontal rule: muted color
     let hr = TextTag::builder()
         .name("hr")
-        .foreground("#555555")
+        .foreground(if is_dark { "#555555" } else { "#cccccc" })
         .justification(gtk4::Justification::Center)
         .build();
     table.add(&hr);
@@ -104,8 +129,8 @@ pub fn create_tag_table() -> TextTagTable {
         .name("h1")
         .weight(700)
         .scale(1.4)
-        .pixels_above_lines(8)
-        .pixels_below_lines(4)
+        .pixels_above_lines(4)
+        .pixels_below_lines(1)
         .build();
     table.add(&h1);
 
@@ -113,8 +138,8 @@ pub fn create_tag_table() -> TextTagTable {
         .name("h2")
         .weight(700)
         .scale(1.25)
-        .pixels_above_lines(6)
-        .pixels_below_lines(3)
+        .pixels_above_lines(3)
+        .pixels_below_lines(1)
         .build();
     table.add(&h2);
 
@@ -122,10 +147,58 @@ pub fn create_tag_table() -> TextTagTable {
         .name("h3")
         .weight(700)
         .scale(1.1)
-        .pixels_above_lines(4)
-        .pixels_below_lines(2)
+        .pixels_above_lines(2)
+        .pixels_below_lines(1)
         .build();
     table.add(&h3);
+
+    let h4 = TextTag::builder()
+        .name("h4")
+        .weight(700)
+        .pixels_above_lines(2)
+        .pixels_below_lines(1)
+        .build();
+    table.add(&h4);
+
+    let h5 = TextTag::builder()
+        .name("h5")
+        .weight(700)
+        .pixels_above_lines(2)
+        .pixels_below_lines(1)
+        .build();
+    table.add(&h5);
+
+    let h6 = TextTag::builder()
+        .name("h6")
+        .weight(700)
+        .foreground(if is_dark { "#9e9e9e" } else { "#757575" })
+        .pixels_above_lines(2)
+        .pixels_below_lines(1)
+        .build();
+    table.add(&h6);
+
+    // Nested list items
+    let list_item_2 = TextTag::builder()
+        .name("list-item-2")
+        .left_margin(32)
+        .build();
+    table.add(&list_item_2);
+
+    let list_item_3 = TextTag::builder()
+        .name("list-item-3")
+        .left_margin(48)
+        .build();
+    table.add(&list_item_3);
+
+    // Table: monospace for alignment
+    let table_tag = TextTag::builder()
+        .name("table")
+        .family("monospace")
+        .left_margin(8)
+        .pixels_above_lines(1)
+        .pixels_below_lines(1)
+        .build();
+    table.add(&table_tag);
 
     table
 }
@@ -184,7 +257,6 @@ impl<'a> Parser<'a> {
                     self.insert_plain("\n");
                 }
                 self.parse_inline_with_block_tag(&header.text, header.tag);
-                self.insert_plain("\n");
                 i += 1;
             }
             // Blockquote: > text
@@ -202,23 +274,40 @@ impl<'a> Parser<'a> {
                 }
                 i += 1;
             }
-            // Bullet list: - item, * item, + item
-            else if let Some(content) = self.parse_bullet_line(line) {
+            // Bullet list: - item, * item, + item (with nesting)
+            else if let Some((level, content)) = self.parse_bullet_line(line) {
                 if i > 0 {
                     self.insert_plain("\n");
                 }
-                self.insert_plain("• ");
-                self.parse_inline_with_block_tag(content, "list-item");
+                let (bullet, tag) = match level {
+                    0 => ("• ", "list-item"),
+                    1 => ("◦ ", "list-item-2"),
+                    _ => ("▪ ", "list-item-3"),
+                };
+                self.insert_plain(bullet);
+                self.parse_inline_with_block_tag(content, tag);
                 i += 1;
             }
-            // Numbered list: 1. item, 2. item
-            else if let Some((num, content)) = self.parse_numbered_line(line) {
+            // Numbered list: 1. item, 2. item (with nesting)
+            else if let Some((level, num, content)) = self.parse_numbered_line(line) {
                 if i > 0 {
                     self.insert_plain("\n");
                 }
+                let tag = match level {
+                    0 => "list-item",
+                    1 => "list-item-2",
+                    _ => "list-item-3",
+                };
                 self.insert_plain(&format!("{}. ", num));
-                self.parse_inline_with_block_tag(content, "list-item");
+                self.parse_inline_with_block_tag(content, tag);
                 i += 1;
+            }
+            // Table: | col | col |
+            else if self.is_table_line(line) {
+                if i > 0 {
+                    self.insert_plain("\n");
+                }
+                i = self.parse_table(&lines, i);
             }
             // Regular line with inline formatting
             else {
@@ -245,27 +334,30 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse bullet list line (- item, * item, + item)
-    fn parse_bullet_line<'b>(&self, line: &'b str) -> Option<&'b str> {
+    fn parse_bullet_line<'b>(&self, line: &'b str) -> Option<(usize, &'b str)> {
+        let indent = line.len() - line.trim_start().len();
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed
+        let content = if let Some(rest) = trimmed
             .strip_prefix("- ")
             .or_else(|| trimmed.strip_prefix("+ "))
         {
-            Some(rest)
+            rest
         } else if trimmed.starts_with("* ") && !trimmed.starts_with("**") {
-            Some(&trimmed[2..])
+            &trimmed[2..]
         } else {
-            None
-        }
+            return None;
+        };
+        Some(((indent / 2).min(2), content))
     }
 
     /// Parse numbered list line (1. item, 2. item)
-    fn parse_numbered_line<'b>(&self, line: &'b str) -> Option<(&'b str, &'b str)> {
+    fn parse_numbered_line<'b>(&self, line: &'b str) -> Option<(usize, &'b str, &'b str)> {
+        let indent = line.len() - line.trim_start().len();
         let trimmed = line.trim_start();
         let dot_pos = trimmed.find(". ")?;
         let num = &trimmed[..dot_pos];
         if num.chars().all(|c| c.is_ascii_digit()) && !num.is_empty() {
-            Some((num, &trimmed[dot_pos + 2..]))
+            Some(((indent / 2).min(2), num, &trimmed[dot_pos + 2..]))
         } else {
             None
         }
@@ -307,14 +399,21 @@ impl<'a> Parser<'a> {
     /// Parse header line, returns (text, tag) if header found
     fn parse_header_line(&self, line: &str) -> Option<Header> {
         // Check in order: ### before ## before # (longest prefix first)
-        [("### ", "h3"), ("## ", "h2"), ("# ", "h1")]
-            .iter()
-            .find_map(|(prefix, tag)| {
-                line.strip_prefix(prefix).map(|text| Header {
-                    text: text.to_string(),
-                    tag,
-                })
+        [
+            ("###### ", "h6"),
+            ("##### ", "h5"),
+            ("#### ", "h4"),
+            ("### ", "h3"),
+            ("## ", "h2"),
+            ("# ", "h1"),
+        ]
+        .iter()
+        .find_map(|(prefix, tag)| {
+            line.strip_prefix(prefix).map(|text| Header {
+                text: text.to_string(),
+                tag,
             })
+        })
     }
 
     /// Parse inline formatting: bold, italic, inline code, strikethrough, links
@@ -344,8 +443,10 @@ impl<'a> Parser<'a> {
                     self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
                 }
 
-                if let Some((st_text, end)) = self.extract_double_delimited(&chars, i + 2, '~') {
-                    self.insert_with_tag(&st_text, "strikethrough");
+                if let Some((st_text, end)) =
+                    self.extract_double_delimited(&chars, i + 2, '~', false)
+                {
+                    self.parse_inline_with_block_tag(&st_text, "strikethrough");
                     i = end + 2;
                     plain_start = i;
                     continue;
@@ -369,8 +470,10 @@ impl<'a> Parser<'a> {
                     self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
                 }
 
-                if let Some((bold_text, end)) = self.extract_double_delimited(&chars, i + 2, '*') {
-                    self.insert_with_tag(&bold_text, "bold");
+                if let Some((bold_text, end)) =
+                    self.extract_double_delimited(&chars, i + 2, '*', false)
+                {
+                    self.parse_inline_with_block_tag(&bold_text, "bold");
                     i = end + 2;
                     plain_start = i;
                     continue;
@@ -388,9 +491,52 @@ impl<'a> Parser<'a> {
                     self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
                 }
 
-                if let Some((italic_text, end)) = self.extract_single_delimited(&chars, i + 1, '*')
+                if let Some((italic_text, end)) =
+                    self.extract_single_delimited(&chars, i + 1, '*', false)
                 {
-                    self.insert_with_tag(&italic_text, "italic");
+                    self.parse_inline_with_block_tag(&italic_text, "italic");
+                    i = end + 1;
+                    plain_start = i;
+                    continue;
+                }
+            }
+            // Bold: __...__
+            else if i + 1 < len
+                && chars[i] == '_'
+                && chars[i + 1] == '_'
+                && (i == 0 || !chars[i - 1].is_alphanumeric())
+            {
+                if i > plain_start {
+                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
+                }
+
+                if let Some((bold_text, end)) =
+                    self.extract_double_delimited(&chars, i + 2, '_', true)
+                {
+                    self.parse_inline_with_block_tag(&bold_text, "bold");
+                    i = end + 2;
+                    plain_start = i;
+                    continue;
+                }
+            }
+            // Italic: _..._
+            else if chars[i] == '_'
+                && (i + 1 >= len || chars[i + 1] != '_')
+                && (i == 0 || !chars[i - 1].is_alphanumeric())
+            {
+                if i > 0 && chars[i - 1] == '_' {
+                    i += 1;
+                    continue;
+                }
+
+                if i > plain_start {
+                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
+                }
+
+                if let Some((italic_text, end)) =
+                    self.extract_single_delimited(&chars, i + 1, '_', true)
+                {
+                    self.parse_inline_with_block_tag(&italic_text, "italic");
                     i = end + 1;
                     plain_start = i;
                     continue;
@@ -456,37 +602,22 @@ impl<'a> Parser<'a> {
         None
     }
 
-    /// Extract text between double delimiter: **bold**
+    /// Extract text between double delimiter: **bold**, ~~strike~~
+    /// When `boundary` is true, the char after closing delimiter must not be alphanumeric.
     fn extract_double_delimited(
         &self,
         chars: &[char],
         start: usize,
         delim: char,
+        boundary: bool,
     ) -> Option<(String, usize)> {
         let mut i = start;
         while i + 1 < chars.len() {
-            if chars[i] == delim && chars[i + 1] == delim {
+            if chars[i] == delim
+                && chars[i + 1] == delim
+                && (!boundary || i + 2 >= chars.len() || !chars[i + 2].is_alphanumeric())
+            {
                 let text: String = chars[start..i].iter().collect();
-                return Some((text, i));
-            }
-            i += 1;
-        }
-        None
-    }
-
-    /// Extract text between single delimiter for italic (not double)
-    fn extract_single_delimited(
-        &self,
-        chars: &[char],
-        start: usize,
-        delim: char,
-    ) -> Option<(String, usize)> {
-        let mut i = start;
-        while i < chars.len() {
-            // Found single delimiter (not double)
-            if chars[i] == delim && (i + 1 >= chars.len() || chars[i + 1] != delim) {
-                let text: String = chars[start..i].iter().collect();
-                // Don't match empty content
                 if !text.is_empty() {
                     return Some((text, i));
                 }
@@ -494,6 +625,112 @@ impl<'a> Parser<'a> {
             i += 1;
         }
         None
+    }
+
+    /// Extract text between single delimiter for italic: *text*, _text_
+    /// When `boundary` is true, the char after closing delimiter must not be alphanumeric.
+    fn extract_single_delimited(
+        &self,
+        chars: &[char],
+        start: usize,
+        delim: char,
+        boundary: bool,
+    ) -> Option<(String, usize)> {
+        let mut i = start;
+        while i < chars.len() {
+            if chars[i] == delim
+                && (i + 1 >= chars.len() || chars[i + 1] != delim)
+                && (!boundary || i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric())
+            {
+                let text: String = chars[start..i].iter().collect();
+                if !text.is_empty() {
+                    return Some((text, i));
+                }
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Check if line is a table row
+    fn is_table_line(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+        trimmed.starts_with('|') && trimmed.matches('|').count() >= 3
+    }
+
+    /// Check if line is a table separator (|---|---|)
+    fn is_table_separator(&self, line: &str) -> bool {
+        let trimmed = line.trim();
+        trimmed.starts_with('|')
+            && trimmed.contains('-')
+            && trimmed
+                .chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
+    }
+
+    /// Parse table block, returns next line index
+    fn parse_table(&mut self, lines: &[&str], start: usize) -> usize {
+        let mut i = start;
+        let mut raw_rows = Vec::new();
+
+        while i < lines.len() && self.is_table_line(lines[i]) {
+            raw_rows.push(lines[i]);
+            i += 1;
+        }
+
+        // Parse cells, skip separator rows
+        let rows: Vec<Vec<String>> = raw_rows
+            .iter()
+            .filter(|line| !self.is_table_separator(line))
+            .map(|line| {
+                line.split('|')
+                    .map(|cell| cell.trim().to_string())
+                    .filter(|cell| !cell.is_empty())
+                    .collect()
+            })
+            .collect();
+
+        if rows.is_empty() {
+            return i;
+        }
+
+        let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+        let mut col_widths = vec![0usize; num_cols];
+        for row in &rows {
+            for (j, cell) in row.iter().enumerate() {
+                if j < num_cols {
+                    col_widths[j] = col_widths[j].max(cell.chars().count());
+                }
+            }
+        }
+
+        for (ri, row) in rows.iter().enumerate() {
+            if ri > 0 || start > 0 {
+                self.insert_plain("\n");
+            }
+            let formatted: String = (0..num_cols)
+                .map(|j| {
+                    let cell = row.get(j).map(|s| s.as_str()).unwrap_or("");
+                    let pad = col_widths[j].saturating_sub(cell.chars().count());
+                    format!("{}{}", cell, " ".repeat(pad))
+                })
+                .collect::<Vec<_>>()
+                .join(" │ ");
+            self.insert_with_tag(&formatted, "table");
+
+            // Separator after header row
+            if ri == 0 && rows.len() > 1 {
+                self.insert_plain("\n");
+                let sep: String = col_widths
+                    .iter()
+                    .map(|&w| "─".repeat(w))
+                    .collect::<Vec<_>>()
+                    .join("─┼─");
+                self.insert_with_tag(&sep, "table");
+            }
+        }
+
+        i
     }
 
     /// Parse inline formatting and wrap the entire result with a block-level tag
