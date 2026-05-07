@@ -16,6 +16,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
+pub const LIVE_CHUNK_MIN_SECS: u64 = 5;
+pub const LIVE_CHUNK_MAX_SECS: u64 = 12;
+
 /// AI provider selection
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -96,15 +99,9 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn min_live_chunk_secs(&self) -> u64 {
-        match self.stt_provider {
-            SttProvider::Groq => 10,
-            SttProvider::OpenAI => 5,
-        }
-    }
-
     pub fn effective_live_chunk_secs(&self) -> u64 {
-        self.live_chunk_secs.clamp(self.min_live_chunk_secs(), 12)
+        self.live_chunk_secs
+            .clamp(LIVE_CHUNK_MIN_SECS, LIVE_CHUNK_MAX_SECS)
     }
 
     /// Get API key for the active provider
