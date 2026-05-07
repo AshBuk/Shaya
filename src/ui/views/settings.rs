@@ -354,6 +354,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
                 adw::ColorScheme::ForceLight
             });
         }
+        crate::ui::stealth::apply_dark_override(is_dark);
         schedule_autosave(&debounce, &state_c);
     });
 

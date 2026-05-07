@@ -31,8 +31,24 @@ const APP_ID: &str = "com.shaya.stealth";
 thread_local! {
     static MAIN_WINDOW: RefCell<Option<ApplicationWindow>> = const { RefCell::new(None) };
     static MAIN_STATE: RefCell<Option<Rc<RefCell<AppState>>>> = const { RefCell::new(None) };
-    // Manual hidden state: minimize() doesn't change is_visible(), so we track it ourselves
     static WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
+    static THEME_CSS: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
+}
+
+const DARK_OVERRIDES: &str = "@define-color window_bg_color #141414;
+     @define-color view_bg_color #1a1a1a;
+     @define-color headerbar_bg_color #0f0f0f;
+     @define-color card_bg_color #1e1e1e;
+     @define-color popover_bg_color #1e1e1e;
+     @define-color sidebar_bg_color #141414;";
+
+/// Reload theme CSS (call on dark mode toggle)
+pub fn apply_dark_override(is_dark: bool) {
+    THEME_CSS.with(|t| {
+        if let Some(css) = t.borrow().as_ref() {
+            css.load_from_data(if is_dark { DARK_OVERRIDES } else { "" });
+        }
+    });
 }
 
 /// Run the stealth window application
@@ -87,13 +103,23 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
         ".header-bar { border-bottom: 1px solid alpha(currentColor, 0.08); }
          .control-panel { border-top: 1px solid alpha(currentColor, 0.08); }",
     );
+    let theme_css = CssProvider::new();
+    if state.borrow().settings.dark_mode {
+        theme_css.load_from_data(DARK_OVERRIDES);
+    }
     if let Some(display) = gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
             &display,
             &css,
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &theme_css,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
     }
+    THEME_CSS.with(|t| *t.borrow_mut() = Some(theme_css));
 
     let (window_width, window_height) = {
         let s = state.borrow();
