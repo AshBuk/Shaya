@@ -112,10 +112,8 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     if let Ok(texture) = gtk4::gdk::Texture::from_bytes(&logo_bytes) {
         welcome_page.set_paintable(Some(&texture));
     }
-    welcome_page.set_title("Shaya");
-    welcome_page.set_description(Some(
-        "A fast and quiet AI assistant for deep work\n\nType a message, record voice, or capture a screenshot",
-    ));
+    welcome_page.set_title("Shaya AI");
+    welcome_page.set_description(Some("A fast and quiet AI assistant for deep work"));
 
     // Stack: toggle between welcome and chat
     let content_stack = gtk4::Stack::new();
