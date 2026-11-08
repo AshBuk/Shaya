@@ -35,6 +35,7 @@ pub(super) struct LiveContext {
     pub status_label: Label,
     pub transcript_label: Label,
     pub attached_image: Rc<RefCell<Option<ImageData>>>,
+    pub attach_label: Label,
     pub audio_btn: Button,
     pub listen_btn: Button,
     pub live_btn: Button,
@@ -365,8 +366,13 @@ fn handle_speech_chunk(
             .is_some_and(|span| span >= MAX_PENDING_CHUNKS)
     };
 
-    if should_close {
-        close_pending_utterance(&ctx, &runtime, Some(seq));
+    // A long utterance closes here, and the silence after it finds nothing left to close.
+    if should_close
+        && close_pending_utterance(&ctx, &runtime, Some(seq))
+        && ctx.state.borrow().settings.live_auto_suggest
+    {
+        request_answer(ctx, runtime, false);
+        return;
     }
 
     show_status(&ctx.status_label, "Live: listening");
@@ -467,35 +473,59 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         (live.run_id, range, transcript_text)
     };
 
-    let (provider, api_key, model, system_prompt, mut messages, cache_up_to_message) = {
+    let (route, system_prompt, mut messages, cache_up_to_message, generation) = {
         let state = ctx.state.borrow();
-        let provider = state.settings.provider;
-        let messages = live_context_messages(&state, provider);
-        let cache_up_to_message = (provider == AiProvider::Anthropic)
+        // Only images that reach the request choose the model. The image model applies
+        // to a text-only main model, so the main provider's context decides.
+        let has_images = ctx.attached_image.borrow().is_some()
+            || live_context(&state.current_messages, state.settings.provider)
+                .iter()
+                .any(|m| m.image.is_some());
+        let route = state.settings.chat_route(has_images);
+        let messages = live_context(&state.current_messages, route.provider).to_vec();
+        let cache_up_to_message = (route.provider == AiProvider::Anthropic)
             .then(|| last_anthropic_message_index(&messages))
             .flatten();
         (
-            provider,
-            state.settings.active_api_key().to_string(),
-            state.settings.active_model().to_string(),
+            route,
             live_system_prompt(&state),
             messages,
             cache_up_to_message,
+            state.chat_generation,
         )
     };
+
+    let image_notice = route.image_notice();
+    if route.api_key.is_empty() {
+        clear_in_flight(&runtime, range);
+        let hint = image_notice.map_or(String::new(), |notice| format!(", {notice}"));
+        show_status(
+            &ctx.status_label,
+            &format!("Set AI API key in Settings{hint}"),
+        );
+        return;
+    }
 
     let pending_message =
         live_transcript_message(transcript_text, ctx.attached_image.borrow().clone());
     messages.push(pending_message.clone());
     let options = ChatOptions {
-        anthropic_cache: provider == AiProvider::Anthropic,
+        anthropic_cache: route.provider == AiProvider::Anthropic,
         cache_up_to_message,
+        anthropic_low_effort: true,
+        ..ChatOptions::default()
     };
 
-    show_status(&ctx.status_label, "Live: thinking");
+    show_status(
+        &ctx.status_label,
+        &match image_notice {
+            Some(notice) => format!("Live: thinking, {notice}"),
+            None => "Live: thinking".to_string(),
+        },
+    );
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = LlmClient::new(provider, &api_key, &model);
+            let client = LlmClient::new(route.provider, &route.api_key, &route.model);
             client
                 .chat_with_options(&messages, &system_prompt, options)
                 .map_err(|e| e.to_string())
@@ -507,7 +537,9 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         }
 
         match result {
-            Ok(Ok(response)) => apply_live_response(ctx, runtime, range, pending_message, response),
+            Ok(Ok(response)) => {
+                apply_live_response(ctx, runtime, range, pending_message, response, generation)
+            }
             Ok(Err(e)) => {
                 clear_in_flight(&runtime, range);
                 show_status(&ctx.status_label, &format!("Live LLM failed: {}", e));
@@ -526,6 +558,7 @@ fn apply_live_response(
     range: LiveRequestRange,
     pending_message: Message,
     response: String,
+    generation: u64,
 ) {
     let mut reschedule = false;
     {
@@ -539,7 +572,17 @@ fn apply_live_response(
         } else if is_no_suggestion(&response) {
             session.mark_evaluated(range);
             show_status(&ctx.status_label, "Live: no suggestion");
+        } else if ctx.state.borrow().chat_generation != generation {
+            // The chat this answer belongs to was cleared or replaced.
+            session.mark_evaluated(range);
+            show_status(&ctx.status_label, "Live: listening");
         } else {
+            if clear_answered_image(
+                &mut ctx.attached_image.borrow_mut(),
+                pending_message.image.as_ref(),
+            ) {
+                ctx.attach_label.set_visible(false);
+            }
             let mut state = ctx.state.borrow_mut();
             state.current_messages.push(pending_message);
             state.current_messages.push(Message {
@@ -556,6 +599,16 @@ fn apply_live_response(
     if reschedule && runtime.borrow().is_active() {
         request_answer(ctx, runtime, false);
     }
+}
+
+/// Later requests must not resend an answered screenshot. One attached while the
+/// request was running was not sent yet, so it stays. Returns true if cleared.
+fn clear_answered_image(attached: &mut Option<ImageData>, sent: Option<&ImageData>) -> bool {
+    let answered = sent.is_some() && attached.as_ref() == sent;
+    if answered {
+        *attached = None;
+    }
+    answered
 }
 
 fn clear_in_flight(runtime: &Rc<RefCell<LiveRuntime>>, range: LiveRequestRange) {
@@ -580,13 +633,12 @@ fn live_system_prompt(state: &AppState) -> String {
     }
 }
 
-fn live_context_messages(state: &AppState, provider: AiProvider) -> Vec<Message> {
+fn live_context(messages: &[Message], provider: AiProvider) -> &[Message] {
     if provider == AiProvider::Anthropic {
-        return state.current_messages.clone();
+        return messages;
     }
 
-    let len = state.current_messages.len();
-    state.current_messages[len.saturating_sub(LIVE_CONTEXT_MESSAGES)..].to_vec()
+    &messages[messages.len().saturating_sub(LIVE_CONTEXT_MESSAGES)..]
 }
 
 fn last_anthropic_message_index(messages: &[Message]) -> Option<usize> {
@@ -659,6 +711,48 @@ mod tests {
             content: String::new(),
             image: None,
         }
+    }
+
+    #[test]
+    fn only_the_answered_screenshot_is_cleared() {
+        let image = |data: &str| ImageData {
+            base64_data: data.to_string(),
+            mime_type: "image/png".to_string(),
+        };
+
+        let mut same = Some(image("a"));
+        assert!(clear_answered_image(&mut same, Some(&image("a"))));
+        assert!(same.is_none());
+
+        let mut newer = Some(image("b"));
+        assert!(!clear_answered_image(&mut newer, Some(&image("a"))));
+        assert_eq!(newer, Some(image("b")));
+
+        let mut attached_after_text_request = Some(image("b"));
+        assert!(!clear_answered_image(
+            &mut attached_after_text_request,
+            None
+        ));
+        assert!(attached_after_text_request.is_some());
+    }
+
+    #[test]
+    fn screenshot_leaves_the_context_after_eight_messages() {
+        let mut messages = vec![message(Role::Assistant); LIVE_CONTEXT_MESSAGES];
+        messages[0].image = Some(ImageData {
+            base64_data: "a".to_string(),
+            mime_type: "image/png".to_string(),
+        });
+        let has_image = |messages: &[Message], provider| {
+            live_context(messages, provider)
+                .iter()
+                .any(|m| m.image.is_some())
+        };
+
+        assert!(has_image(&messages, AiProvider::Groq));
+        messages.push(message(Role::User));
+        assert!(!has_image(&messages, AiProvider::Groq));
+        assert!(has_image(&messages, AiProvider::Anthropic));
     }
 
     #[test]

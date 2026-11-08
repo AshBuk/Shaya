@@ -51,6 +51,10 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     status_label.set_max_width_chars(40);
     status_label.add_css_class("dim-label");
     status_label.set_visible(false);
+    if let Some(error) = &state.borrow().load_error {
+        status_label.set_text(error);
+        status_label.set_visible(true);
+    }
     vbox.append(&status_label);
 
     let transcript_label = Label::new(None);
@@ -250,6 +254,7 @@ pub fn build_input(
         status_label: status_label.clone(),
         transcript_label: transcript_label.clone(),
         attached_image: attached_image.clone(),
+        attach_label: attachment_label.clone(),
         audio_btn: audio_btn.clone(),
         listen_btn: listen_btn.clone(),
         live_btn: live_btn.clone(),
@@ -281,8 +286,8 @@ pub fn build_input(
         let status_c = status_label.clone();
         let attach_label_c = attachment_label.clone();
 
-        area_btn.connect_clicked(move |_| {
-            messaging::handle_area_capture_click(&image_c, &status_c, &attach_label_c);
+        area_btn.connect_clicked(move |btn| {
+            messaging::handle_area_capture_click(btn, &image_c, &status_c, &attach_label_c);
         });
     }
 
@@ -293,8 +298,8 @@ pub fn build_input(
         let status_c = status_label.clone();
         let attach_label_c = attachment_label.clone();
 
-        screenshot_btn.connect_clicked(move |_| {
-            messaging::handle_screenshot_click(&image_c, &status_c, &attach_label_c);
+        screenshot_btn.connect_clicked(move |btn| {
+            messaging::handle_screenshot_click(btn, &image_c, &status_c, &attach_label_c);
         });
     }
 
@@ -361,7 +366,7 @@ pub fn build_input(
         let entry_c = entry.clone();
 
         clear_btn.connect_clicked(move |_| {
-            state_c.borrow_mut().current_messages.clear();
+            state_c.borrow_mut().replace_chat(Vec::new());
             *image_c.borrow_mut() = None;
             attach_label_c.set_visible(false);
             entry_c.set_text("");
