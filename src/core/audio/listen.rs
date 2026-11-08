@@ -156,41 +156,16 @@ impl ListenRecorder {
 
     /// Find PipeWire monitor source (uses default sink's monitor)
     fn find_pipewire_monitor() -> Option<String> {
-        // Use wpctl to get default sink node name
-        let output = Command::new("wpctl")
-            .args(["inspect", "@DEFAULT_AUDIO_SINK@"])
-            .output()
-            .ok()?;
+        let sink = command_stdout("wpctl", &["inspect", "@DEFAULT_AUDIO_SINK@"])
+            .and_then(|stdout| parse_wpctl_sink(&stdout))
+            .or_else(|| {
+                command_stdout("pw-metadata", &["0", "default.audio.sink"])
+                    .and_then(|stdout| parse_pw_metadata_sink(&stdout))
+            })?;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        // Find node.name in wpctl output
-        for line in stdout.lines() {
-            if line.contains("node.name") {
-                if let Some(name) = line.split('=').nth(1) {
-                    let name = name.trim().trim_matches('"').trim();
-                    let monitor = format!("{}.monitor", name);
-                    tracing::info!("Found PipeWire default sink monitor: {}", monitor);
-                    return Some(monitor);
-                }
-            }
-        }
-
-        // Fallback: try pw-cli
-        let output = Command::new("pw-cli").args(["info", "0"]).output().ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        for line in stdout.lines() {
-            if line.contains("default.audio.sink") {
-                if let Some(name) = line.split('"').nth(1) {
-                    let monitor = format!("{}.monitor", name);
-                    tracing::info!("Found PipeWire monitor: {}", monitor);
-                    return Some(monitor);
-                }
-            }
-        }
-
-        None
+        let monitor = format!("{}.monitor", sink);
+        tracing::info!("Found PipeWire default sink monitor: {}", monitor);
+        Some(monitor)
     }
 
     /// Find PulseAudio monitor source (uses default sink's monitor)
@@ -230,6 +205,31 @@ impl ListenRecorder {
     }
 }
 
+fn command_stdout(cmd: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(cmd).args(args).output().ok()?;
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Read the sink name from `  * node.name = "name"` in `wpctl inspect` output.
+fn parse_wpctl_sink(stdout: &str) -> Option<String> {
+    let value = stdout
+        .lines()
+        .filter(|line| line.contains("node.name"))
+        .find_map(|line| line.split('=').nth(1))?;
+    Some(value.trim().trim_matches('"').trim().to_string())
+}
+
+/// Read the sink name from the JSON value in `pw-metadata` output.
+fn parse_pw_metadata_sink(stdout: &str) -> Option<String> {
+    let line = stdout
+        .lines()
+        .find(|line| line.contains("key:'default.audio.sink'"))?;
+    let (_, rest) = line.split_once("value:'")?;
+    let (value, _) = rest.split_once("' type:")?;
+    let json: serde_json::Value = serde_json::from_str(value).ok()?;
+    json["name"].as_str().map(str::to_owned)
+}
+
 impl Default for ListenRecorder {
     fn default() -> Self {
         Self::new()
@@ -256,6 +256,29 @@ mod tests {
             output_path,
             is_listening: Arc::new(AtomicBool::new(true)),
         }
+    }
+
+    #[test]
+    fn wpctl_output_gives_the_sink_name() {
+        let stdout = "id 58, type PipeWire:Interface:Node\n  * node.description = \"Speakers\"\n  * node.name = \"alsa_output.analog-stereo\"\n";
+        assert_eq!(
+            parse_wpctl_sink(stdout).as_deref(),
+            Some("alsa_output.analog-stereo")
+        );
+        assert_eq!(parse_wpctl_sink(""), None);
+    }
+
+    #[test]
+    fn pw_metadata_output_gives_the_sink_name() {
+        let stdout = "Found \"default\" metadata 40\nupdate: id:0 key:'default.audio.sink' value:'{\"name\":\"alsa_output.analog-stereo\"}' type:'Spa:String:JSON'\n";
+        assert_eq!(
+            parse_pw_metadata_sink(stdout).as_deref(),
+            Some("alsa_output.analog-stereo")
+        );
+        assert_eq!(
+            parse_pw_metadata_sink("Found \"default\" metadata 40\n"),
+            None
+        );
     }
 
     #[test]
