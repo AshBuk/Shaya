@@ -9,6 +9,9 @@
 pub mod llm;
 pub mod whisper;
 
+#[cfg(test)]
+mod live_providers;
+
 pub use llm::{ChatOptions, LlmClient};
 pub use whisper::WhisperClient;
 

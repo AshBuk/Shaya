@@ -39,6 +39,15 @@ Commit subjects use `scope: short imperative subject` in lowercase, for example 
 
 Overlay behavior depends on the compositor, so say in the pull request which compositor you tested on. See the [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor setup. On Hyprland, `scripts/test-stealth` checks the configuration.
 
+## Checking the providers
+
+These tests send real, billed requests with short replies and no retries, so CI does not run them. A provider without a key is skipped. `SHAYA_LIVE_AUDIO` points to a short WAV with speech that contains the word "test", and a `.opus` file with the same name is tried as well.
+
+```bash
+GROQ_API_KEY=... ANTHROPIC_API_KEY=... OPENAI_API_KEY=... SHAYA_LIVE_AUDIO=speech.wav \
+  cargo test --lib live_providers -- --ignored --nocapture --test-threads=1
+```
+
 ## Reporting a bug
 
 Include your distribution, compositor and the relevant part of `./dev logs`. Logs can contain your own text, so read them before posting.
