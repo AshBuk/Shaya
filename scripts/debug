@@ -8,7 +8,13 @@
 # Shaya - Run in background with debug logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_FILE="/tmp/shaya.log"
+LOG_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/shaya"
+
+# Debug logs can contain private text: keep them readable by this user only.
+umask 077
+mkdir -p "$LOG_DIR"
+chmod 700 "$LOG_DIR"
+LOG_FILE="$LOG_DIR/shaya.log"
 
 RUST_LOG=debug "$PROJECT_ROOT/target/release/shaya" > "$LOG_FILE" 2>&1 &
 PID=$!

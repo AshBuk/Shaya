@@ -17,7 +17,7 @@ cargo build --release
 
 ## Running and debugging
 
-`./dev debug` runs the release binary with `RUST_LOG=debug`, and `./dev logs` follows its output in `/tmp/shaya.log`. Build first, both use `target/release/shaya`.
+`./dev debug` runs the release binary with `RUST_LOG=debug`, and `./dev logs` follows its output in `$XDG_RUNTIME_DIR/shaya/shaya.log`. Build first, both use `target/release/shaya`.
 
 Only one instance runs at a time: starting the binary again shows or hides the window. To stop it, run `pkill -f shaya`.
 

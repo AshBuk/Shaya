@@ -4,67 +4,103 @@
 //
 // https://github.com/AshBuk/Shaya
 
-//! Process lock file for single-instance without D-Bus
+//! Single-instance lock without D-Bus
 //!
-//! STEALTH: Uses lock file instead of D-Bus activation to prevent
+//! STEALTH: Uses a file lock instead of D-Bus activation to prevent
 //! duplicate instances while keeping the app invisible in service lists.
 //!
-//! When a second instance is launched, it sends SIGUSR1 to the first
-//! instance to show the window, then exits.
+//! The kernel releases the lock when the process dies, so a stale file cannot
+//! point at an unrelated process. A second instance sends SIGUSR1 to the PID
+//! stored by the lock holder, then exits.
 
-use std::fs;
-use std::path::PathBuf;
+use crate::core::utils;
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 
-/// Get lock file path
-pub fn path() -> PathBuf {
-    dirs::runtime_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("shaya.lock")
+/// Keeps this process the running instance until dropped.
+pub struct InstanceLock {
+    _file: File,
 }
 
-/// Acquire lock file
-///
-/// Returns Ok(true) if lock acquired (we are the first instance).
-/// Returns Ok(false) if another instance is running (signaled to show).
-/// Returns Err only on actual errors.
-pub fn acquire() -> anyhow::Result<bool> {
-    let lock_path = path();
+/// Returns the lock when this is the first instance.
+/// Returns `None` after signaling the instance that is already running.
+pub fn acquire() -> anyhow::Result<Option<InstanceLock>> {
+    let path = utils::runtime_dir()?.join("shaya.lock");
+    let lock = try_acquire(&path)?;
+    if lock.is_none() {
+        signal_running_instance(&path);
+    }
+    Ok(lock)
+}
 
-    if lock_path.exists() {
-        // Check if the process is still running by reading PID
-        if let Ok(pid_str) = fs::read_to_string(&lock_path) {
-            if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                // Check if process exists (Linux-specific)
-                let proc_path = format!("/proc/{}", pid);
-                if std::path::Path::new(&proc_path).exists() {
-                    // Send SIGUSR1 to show the window
-                    #[cfg(unix)]
-                    {
-                        use nix::sys::signal::{kill, Signal};
-                        use nix::unistd::Pid;
-                        tracing::info!("Shaya already running (PID: {}), sending show signal", pid);
-                        if kill(Pid::from_raw(pid), Signal::SIGUSR1).is_ok() {
-                            tracing::info!("Signal sent - window should appear");
-                        }
-                    }
-                    return Ok(false); // Don't start, existing instance will show
-                }
-            }
+fn try_acquire(path: &Path) -> io::Result<Option<InstanceLock>> {
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)?;
+
+    match file.try_lock() {
+        Ok(()) => {
+            file.set_len(0)?;
+            file.write_all(std::process::id().to_string().as_bytes())?;
+            tracing::debug!("Lock acquired: {:?}", path);
+            Ok(Some(InstanceLock { _file: file }))
         }
-        // Stale lock file, remove it
-        let _ = fs::remove_file(&lock_path);
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(e)) => Err(e),
+    }
+}
+
+fn signal_running_instance(path: &Path) {
+    let pid = fs::read_to_string(path)
+        .ok()
+        .and_then(|content| content.trim().parse::<i32>().ok());
+    let Some(pid) = pid else {
+        tracing::warn!("Shaya is starting in another process, no window to toggle yet");
+        return;
+    };
+    tracing::info!("Shaya already running (PID: {}), sending show signal", pid);
+    if let Err(e) = kill(Pid::from_raw(pid), Signal::SIGUSR1) {
+        tracing::warn!("Failed to signal running instance: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_one_holder_at_a_time() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("shaya.lock");
+
+        let first = try_acquire(&path).unwrap();
+        assert!(first.is_some());
+        assert!(try_acquire(&path).unwrap().is_none());
+
+        drop(first);
+        assert!(try_acquire(&path).unwrap().is_some());
     }
 
-    // Create lock file with our PID
-    fs::write(&lock_path, std::process::id().to_string())?;
-    tracing::debug!("Lock acquired: {:?}", lock_path);
-    Ok(true)
-}
+    #[test]
+    fn stale_pid_from_a_dead_process_does_not_block_startup() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("shaya.lock");
+        fs::write(&path, "1").unwrap();
 
-/// Release lock file
-pub fn release() {
-    let lock_path = path();
-    if let Err(e) = fs::remove_file(&lock_path) {
-        tracing::debug!("Failed to remove lock file: {}", e);
+        let lock = try_acquire(&path).unwrap();
+
+        assert!(lock.is_some());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            std::process::id().to_string()
+        );
     }
 }
