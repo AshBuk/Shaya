@@ -1,7 +1,7 @@
 [package]
 name = "shaya"
 version = "0.1.0"
-description = "Privacy-first AI assistant with stealth mode - invisible on screen sharing."
+description = "Native AI assistant for Linux, built with Rust and GTK4."
 authors = ["Asher Buk"]
 license = "Apache-2.0"
 repository = "https://github.com/AshBuk/Shaya"

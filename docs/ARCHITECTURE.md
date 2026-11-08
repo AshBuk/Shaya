@@ -2,12 +2,12 @@
 
 ## Overview
 
-Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wlr-screencopy` based tools on Wayland (Sway, Hyprland). See [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for PipeWire/Zoom limitations.
+Shaya is an AI assistant that runs as a compositor overlay. Whether it appears in screenshots and screen sharing depends on the compositor: see [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for the tested behavior per environment.
 
 ## Core Principle
 
 **One Rust binary, one unified window:**
-- **Unified Window** — GTK4 + layer-shell + libadwaita (ALL functionality in one invisible window)
+- **Unified Window** — GTK4 + layer-shell + libadwaita (ALL functionality in one window)
 
 **No web technologies. Pure native GTK4.**
 
@@ -35,8 +35,8 @@ Shaya is a privacy-first AI assistant with **stealth mode** — invisible to `wl
 │   │   │  - Meetings View (recordings, transcript)   │   │   │
 │   │   └─────────────────────────────────────────────┘   │   │
 │   │                                                     │   │
-│   │   Wayland: zwlr-layer-shell-v1 → INVISIBLE          │   │
-│   │   X11: Fallback → VISIBLE (no stealth possible)     │   │
+│   │   Wayland: zwlr-layer-shell-v1 → overlay surface    │   │
+│   │   GNOME, X11: Fallback → normal window              │   │
 │   └─────────────────────────────────────────────────────┘   │
 │                            ↕                                │
 │   ┌─────────────────────────────────────────────────────┐   │
@@ -106,7 +106,7 @@ Shaya/
 ## Unified Stealth Window
 
 ### Purpose
-Single window containing ALL functionality — invisible to wlr-screencopy tools (grim, slurp).
+Single window containing ALL functionality. On Hyprland a layer rule blacks it out in captures, other compositors show it (see [STEALTH_GUIDE.md](STEALTH_GUIDE.md)).
 
 ### UI Structure
 ```
@@ -153,4 +153,7 @@ let state = Rc::new(RefCell::new(AppState::default()));
   - `metadata.json`
   - `transcript.txt`
   - `analysis.md`
-  - `system.wav` / `mic.wav` (or `.opus`)
+  - `system.wav` / `mic.wav`, kept until transcription succeeds
+  - `system.opus` / `mic.opus` / `mixed.opus`
+
+These directories are `0700`, and `metadata.json`, `transcript.txt` and `analysis.md` are `0600`. Temporary audio and screenshots, the lock file and `./dev debug` logs live in `$XDG_RUNTIME_DIR/shaya` (or `~/.cache/shaya`).

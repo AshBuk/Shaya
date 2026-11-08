@@ -3,13 +3,13 @@ html<div align="center">
 
 # Shaya
 
-**AI assistant tool for Linux.**
+**Native AI assistant for Linux, built with Rust and GTK4.**
 
 </div>
 
 Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. A fast and quiet tool during deep work. 
 
-Invisible to screen sharing on Wayland (as much as possible).
+On Wayland it runs as a compositor overlay. Whether screen sharing shows it depends on the compositor, see the [Stealth Guide](docs/STEALTH_GUIDE.md).
 
 One Rust binary, pure GTK4.
 
@@ -26,8 +26,9 @@ One Rust binary, pure GTK4.
 | **Conversation History** | Browse, continue, or delete past sessions |
 | **Appearance** | Adjustable opacity, light/dark theme |
 | **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |
-| **Privacy** | BYOK (bring your own key) — no cloud, no servers, data never leaves your machine |
-| **Stealth Mode** | Wayland overlay, hidden as much as possible |
+| **Privacy** | BYOK (bring your own key): no account and no Shaya servers. Requests go directly to the provider you choose, everything else stays on your machine |
+| **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any provider |
+| **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor |
 
 Bring your own API key — Anthropic, OpenAI, or Groq. LLM supports all three providers; STT supports Groq and OpenAI. Groq is especially recommended for STT and fast responses.
 
@@ -41,8 +42,8 @@ Shaya is a **boutique tool** built for Linux users who care about their stack:
 
 - **GTK4 + libadwaita** — GNU/GNOME native, first-class Wayland citizen
 - **Layer Shell** — compositor-level overlay via wlr-layer-shell protocol
-- **Single binary** — no runtime, no daemon, no dependencies beyond GTK
 - **Privacy-first** — your API keys stay local, nothing phones home
+- **Single binary**
 
 #### Overlay Behavior
 
@@ -77,6 +78,12 @@ shaya
 To remove it, run `cargo uninstall shaya`.
 
 Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT.md#system-tools-at-runtime).
+
+---
+
+## Recording Other People
+
+Tell the participants before you record a meeting or capture system audio. Laws differ by country, and some require consent from everyone on the call.
 
 ---
 

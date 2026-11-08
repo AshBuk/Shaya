@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub const NO_SUGGESTION: &str = "NO_SUGGESTION";
 pub const MAX_PENDING_CHUNKS: u64 = 6;
 
-pub const LIVE_SYSTEM_PROMPT: &str = r#"You are Live Assistant, helping the user during a live meeting or interview.
+pub const LIVE_SYSTEM_PROMPT: &str = r#"You are Live Assistant, helping the user during a live meeting.
 
 Use the latest live transcript as context. Respond only when it clearly contains a direct question, concern, decision point, or technical topic where the user likely needs a concise answer.
 
