@@ -39,7 +39,7 @@
 sudo dnf install gtk4-devel libadwaita-devel gtk4-layer-shell-devel
 ```
 
-**Ubuntu/Debian:**
+**Debian 13+, Ubuntu 25.10+:**
 ```bash
 sudo apt install libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```

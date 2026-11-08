@@ -52,26 +52,31 @@ Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears
 
 ---
 
-## Quick Start
+## Install
 
-### Build (Docker)
+Shaya builds from source into one binary. COPR and AUR packages are planned.
 
-```bash
-./dev docker
-```
-
-### Build (local, Fedora)
+Install [Rust](https://rustup.rs) and the system libraries:
 
 ```bash
-sudo dnf install gtk4-devel libadwaita-devel gtk4-layer-shell-devel
-cargo build --release
+# Fedora
+sudo dnf install gcc gtk4-devel libadwaita-devel gtk4-layer-shell-devel
+# Arch
+sudo pacman -S --needed base-devel gtk4 libadwaita gtk4-layer-shell
+# Debian 13+, Ubuntu 25.10+
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```
 
-### Run
+Then build and run:
 
 ```bash
-./dev run
+cargo install --locked --git https://github.com/AshBuk/Shaya
+shaya
 ```
+
+To remove it, run `cargo uninstall shaya`.
+
+Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT.md#system-tools-at-runtime).
 
 ---
 
@@ -91,8 +96,9 @@ cargo build --release
 
 ## Documentation
 
-- [ARCHITECTURE](docs/ARCHITECTURE.md) — project structure, design decisions, state management
-- [DEVELOPMENT](docs/DEVELOPMENT.md) — dependencies, build setup, scripts
+- [CONTRIBUTING](CONTRIBUTING.md): local development, checks before a pull request
+- [ARCHITECTURE](docs/ARCHITECTURE.md): project structure, design decisions, state management
+- [DEVELOPMENT](docs/DEVELOPMENT.md): dependencies, build setup, scripts
 
 ### [Apache-2.0](LICENSE) LICENSE
 
