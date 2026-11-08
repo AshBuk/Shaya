@@ -22,22 +22,26 @@ ok "Wayland"
 if hyprctl layers 2>/dev/null | grep -q "shaya-stealth"; then
     ok "Layer registered"
 else
-    warn "Layer not found (Shaya not running?)"
+    warn "Layer not found (Shaya hidden or not running?)"
 fi
 
-# Check layerrule in config
-if grep -qE "no_screen_share.*shaya-stealth" ~/.config/hypr/hyprland.conf 2>/dev/null; then
-    ok "Layerrule configured"
+# Check the layer rule in the config: one hl.layer_rule block, on any number of lines
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
+if awk 'BEGIN { RS = "hl\\.layer_rule" } /shaya-stealth/ && /no_screen_share *= *true/ { found = 1 } END { exit !found }' "$CONFIG" 2>/dev/null; then
+    ok "Layer rule configured"
 else
-    warn "Add to hyprland.conf:"
-    echo "  layerrule = no_screen_share on, match:namespace shaya-stealth"
+    warn "Add to $CONFIG (Hyprland 0.55 or later):"
+    echo '  hl.layer_rule({ match = { namespace = "shaya-stealth" }, no_screen_share = true })'
 fi
 
 # Screenshot test
 if command -v grim &>/dev/null && pgrep -f shaya >/dev/null; then
-    grim /tmp/stealth-test.png 2>/dev/null
-    ok "Screenshot: /tmp/stealth-test.png"
+    # The whole screen is private: keep it readable by this user only.
+    SHOT_DIR="${XDG_RUNTIME_DIR:-$HOME/.cache}/shaya"
+    SHOT="$SHOT_DIR/stealth-test.png"
+    (umask 077; mkdir -p "$SHOT_DIR"; grim "$SHOT" 2>/dev/null)
+    ok "Screenshot: $SHOT"
     echo
     echo "Verify: Shaya should appear as BLACK RECTANGLE (not invisible)"
-    echo "  xdg-open /tmp/stealth-test.png"
+    echo "  xdg-open $SHOT"
 fi
