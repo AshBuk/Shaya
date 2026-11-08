@@ -6,7 +6,7 @@
 |-------|---------|
 | `gtk4` | UI framework |
 | `libadwaita` | GNOME HIG widgets, dark mode |
-| `gtk4-layer-shell` | Wayland layer-shell (stealth) |
+| `gtk4-layer-shell` | Wayland layer-shell overlay |
 | `serde` / `serde_json` | Settings serialization |
 | `anyhow` | Error handling |
 | `tracing` / `tracing-subscriber` | Structured logging |
@@ -28,9 +28,20 @@
 - `ffmpeg` — fallback
 
 **Screenshots** (depends on compositor):
-- `grim` + `slurp` — Hyprland, Sway
-- `spectacle` — KDE Plasma
-- XDG Desktop Portal — GNOME Wayland (no extra tools needed)
+
+| DE | Display | Area Capture | Full Screenshot |
+|----|---------|--------------|-----------------|
+| Hyprland | Wayland | slurp + grim (sync) | grim (sync) |
+| Sway | Wayland | slurp + grim (sync) | grim (sync) |
+| GNOME | Wayland | XDG Portal (async) | XDG Portal (async) |
+| KDE Plasma | Wayland | spectacle -r (sync) | spectacle (sync) |
+| GNOME | X11 | gnome-screenshot -a | gnome-screenshot |
+| KDE | X11 | spectacle -r | spectacle |
+| Other | X11 | gnome-screenshot / spectacle | gnome-screenshot / scrot / spectacle |
+
+> **Note:** On GNOME Wayland both buttons (area and full screenshot) open the native GNOME
+> screenshot dialog via the XDG Desktop Portal (`interactive` mode). The user picks
+> full screen, window, or area within the portal UI.
 
 ### System packages
 

@@ -9,7 +9,7 @@
 //! Uses wlr-layer-shell protocol with namespace "shaya-stealth".
 //! Compositor rules can target this namespace for stealth behavior.
 //!
-//! See docs/STEALTH_GUIDE.md for compositor configuration.
+//! See docs/OVERLAY_GUIDE.md for compositor configuration.
 
 use crate::core::state::Settings;
 use gtk4::ApplicationWindow;
@@ -17,7 +17,7 @@ use gtk4::ApplicationWindow;
 /// Initialize layer-shell for stealth mode
 ///
 /// Layer-shell alone does not hide the window from capture. Whether it appears in
-/// screenshots and screen sharing depends on the compositor, see docs/STEALTH_GUIDE.md.
+/// screenshots and screen sharing depends on the compositor, see docs/OVERLAY_GUIDE.md.
 #[cfg(target_os = "linux")]
 pub fn init(window: &ApplicationWindow, settings: &Settings) {
     use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};

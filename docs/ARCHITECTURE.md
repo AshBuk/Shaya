@@ -2,7 +2,7 @@
 
 ## Overview
 
-Shaya is an AI assistant that runs as a compositor overlay. Whether it appears in screenshots and screen sharing depends on the compositor: see [STEALTH_GUIDE.md](STEALTH_GUIDE.md) for the tested behavior per environment.
+Shaya is an AI assistant that runs as a compositor overlay. Whether it appears in screenshots and screen sharing depends on the compositor: see [OVERLAY_GUIDE.md](OVERLAY_GUIDE.md).
 
 ## Core Principle
 
@@ -106,7 +106,7 @@ Shaya/
 ## Unified Stealth Window
 
 ### Purpose
-Single window containing ALL functionality. On Hyprland a layer rule blacks it out in captures, other compositors show it (see [STEALTH_GUIDE.md](STEALTH_GUIDE.md)).
+Single window containing ALL functionality. On Hyprland a layer rule blacks it out in captures, other compositors show it (see [OVERLAY_GUIDE.md](OVERLAY_GUIDE.md)).
 
 ### UI Structure
 ```

@@ -37,7 +37,7 @@ Clippy treats `unwrap()` and `expect()` as errors in CI, so handle the failure i
 
 Commit subjects use `scope: short imperative subject` in lowercase, for example `chat: extract markdown parsing helpers`.
 
-Overlay behavior depends on the compositor, so say in the pull request which compositor you tested on. See the [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor setup. On Hyprland, `scripts/test-stealth` checks the configuration.
+Overlay behavior depends on the compositor, so say in the pull request which compositor you tested on. See the [Overlay Guide](docs/OVERLAY_GUIDE.md) for compositor setup. On Hyprland, `scripts/test-stealth` checks the configuration.
 
 ## Checking the providers
 

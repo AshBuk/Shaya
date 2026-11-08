@@ -9,7 +9,7 @@ html<div align="center">
 
 Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. A fast and quiet tool during deep work. 
 
-On Wayland it runs as a compositor overlay. Whether screen sharing shows it depends on the compositor, see the [Stealth Guide](docs/STEALTH_GUIDE.md).
+On Wayland it runs as a compositor overlay. Whether screen sharing shows it depends on the compositor, see the [Overlay Guide](docs/OVERLAY_GUIDE.md).
 
 One Rust binary, pure GTK4.
 
@@ -49,7 +49,7 @@ Shaya is a **boutique tool** built for Linux users who care about their stack:
 
 Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears during screen sharing depends on your compositor:
 
-> See [Stealth Guide](docs/STEALTH_GUIDE.md) for compositor setup, workarounds, and cross-platform research.
+> See the [Overlay Guide](docs/OVERLAY_GUIDE.md) for compositor setup and screen sharing.
 
 ---
 

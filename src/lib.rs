@@ -7,7 +7,7 @@
 //! Shaya - Native AI assistant for Linux
 //!
 //! GTK4 + Layer-Shell overlay on Wayland. Whether it appears in screen sharing depends on
-//! the compositor, see docs/STEALTH_GUIDE.md.
+//! the compositor, see docs/OVERLAY_GUIDE.md.
 
 mod core;
 mod ui;
@@ -17,7 +17,7 @@ pub use ui::stealth;
 /// Run the main stealth window
 pub fn run() {
     tracing_subscriber::fmt::init();
-    tracing::info!("Starting Shaya in STEALTH mode");
+    tracing::info!("Starting Shaya");
 
     if let Err(e) = stealth::run() {
         tracing::error!("Failed to start stealth UI: {}", e);

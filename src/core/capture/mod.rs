@@ -7,7 +7,7 @@
 //! Screenshot capture for Wayland/X11
 //!
 //! Stealth behavior:
-//! - Hyprland: Shaya blacked out with the `no_screen_share` layer rule (see STEALTH_GUIDE.md)
+//! - Hyprland: Shaya blacked out with the `no_screen_share` layer rule (see OVERLAY_GUIDE.md)
 //! - Sway: Shaya WILL appear in screenshots (no layer filtering support)
 //! - Selection UI (slurp overlay): whether a screen share shows it depends on the compositor
 

@@ -9,7 +9,7 @@
 //! Single-instance window with layer-shell namespace "shaya-stealth".
 //! Configure compositor rules to control screen share visibility.
 //!
-//! See docs/STEALTH_GUIDE.md for setup.
+//! See docs/OVERLAY_GUIDE.md for setup.
 
 use super::{header, layer_shell, views};
 use crate::core::lock;
@@ -59,7 +59,7 @@ pub fn run() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    // NON_UNIQUE = no D-Bus registration = ghost mode
+    // NON_UNIQUE: no D-Bus name, the file lock keeps a single instance
     let app = adw::Application::builder()
         .application_id(APP_ID)
         .flags(ApplicationFlags::NON_UNIQUE)
