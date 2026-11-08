@@ -28,12 +28,16 @@ jobs:
 
       - run: cargo fmt --all -- --check
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/ashbuk/shaya-build:latest
+  check:
+    name: Clippy & Tests
+    runs-on: ubuntu-latest
+    container: debian:13
     steps:
+      - run: |
+          apt-get update
+          apt-get install -y build-essential ca-certificates curl git pkg-config \
+            libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
@@ -43,3 +47,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo clippy --all-targets -- -D warnings
+
+      - run: cargo test
