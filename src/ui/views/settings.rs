@@ -6,7 +6,9 @@
 
 //! Settings View - API keys and configuration
 
-use crate::core::models::{models_for_provider, stt_models_for_provider};
+use crate::core::models::{
+    default_vision_model, models_for_provider, stt_models_for_provider, ModelInfo,
+};
 use crate::core::state::{
     AiProvider, AppState, SttProvider, LIVE_CHUNK_MAX_SECS, LIVE_CHUNK_MIN_SECS,
 };
@@ -16,6 +18,8 @@ use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
+
+const CUSTOM_MODEL: &str = "Custom ID";
 
 /// Schedule a debounced save: cancels any pending timer and arms a new 500ms one.
 fn schedule_autosave(debounce: &Rc<Cell<Option<glib::SourceId>>>, state: &Rc<RefCell<AppState>>) {
@@ -33,40 +37,113 @@ fn schedule_autosave(debounce: &Rc<Cell<Option<glib::SourceId>>>, state: &Rc<Ref
     debounce.set(Some(source_id));
 }
 
-/// Rebuild model combo row items for the given provider
-fn rebuild_model_list(model_row: &adw::ComboRow, provider: AiProvider, current_model: &str) {
-    let models = models_for_provider(provider);
-    let names: Vec<String> = models
-        .iter()
-        .map(|m| {
-            if m.supports_vision {
-                format!("👁\u{fe0f} {}", m.display_name)
-            } else {
-                m.display_name.to_string()
-            }
-        })
-        .collect();
-    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    model_row.set_model(Some(&StringList::new(&refs)));
-
-    let idx = models
-        .iter()
-        .position(|m| m.id == current_model)
-        .unwrap_or(0);
-    model_row.set_selected(idx as u32);
+/// Model list plus an editable ID, for models the built-in catalog does not have.
+#[derive(Clone)]
+struct ModelPicker {
+    list: adw::ComboRow,
+    id: adw::EntryRow,
+    ids: Rc<RefCell<Vec<&'static str>>>,
+    syncing: Rc<Cell<bool>>,
 }
 
-/// Rebuild STT model combo row items for the given provider
-fn rebuild_stt_model_list(model_row: &adw::ComboRow, provider: SttProvider, current_model: &str) {
-    let models = stt_models_for_provider(provider);
-    let names: Vec<&str> = models.iter().map(|m| m.display_name).collect();
-    model_row.set_model(Some(&StringList::new(&names)));
+impl ModelPicker {
+    fn new(group: &adw::PreferencesGroup, title: &str) -> Self {
+        let list = adw::ComboRow::new();
+        list.set_title(title);
+        let id = adw::EntryRow::new();
+        id.set_title(&format!("{title} ID"));
+        group.add(&list);
+        group.add(&id);
+        Self {
+            list,
+            id,
+            ids: Rc::default(),
+            syncing: Rc::default(),
+        }
+    }
 
-    let idx = models
+    /// Replace the choices without reporting a change.
+    fn show(&self, choices: Vec<(&'static str, String)>, current: &str) {
+        self.syncing.set(true);
+        let mut labels: Vec<&str> = choices.iter().map(|(_, label)| label.as_str()).collect();
+        labels.push(CUSTOM_MODEL);
+        self.list.set_model(Some(&StringList::new(&labels)));
+        *self.ids.borrow_mut() = choices.iter().map(|(id, _)| *id).collect();
+        self.select(current);
+        self.id.set_text(current);
+        self.syncing.set(false);
+    }
+
+    fn select(&self, current: &str) {
+        let ids = self.ids.borrow();
+        let idx = ids
+            .iter()
+            .position(|id| *id == current)
+            .unwrap_or(ids.len());
+        self.list.set_selected(idx as u32);
+    }
+
+    fn connect_changed(&self, on_change: impl Fn(&str) + 'static) {
+        let on_change = Rc::new(on_change);
+
+        let picker = self.clone();
+        let on_list_change = on_change.clone();
+        self.list.connect_selected_notify(move |row| {
+            if picker.syncing.get() {
+                return;
+            }
+            let selected = picker.ids.borrow().get(row.selected() as usize).copied();
+            if let Some(id) = selected {
+                picker.syncing.set(true);
+                picker.id.set_text(id);
+                picker.syncing.set(false);
+                on_list_change(id);
+            } else {
+                picker.id.grab_focus();
+            }
+        });
+
+        let picker = self.clone();
+        self.id.connect_changed(move |row| {
+            let text = row.text();
+            let id = text.trim();
+            if picker.syncing.get() || id.is_empty() {
+                return;
+            }
+            picker.syncing.set(true);
+            picker.select(id);
+            picker.syncing.set(false);
+            on_change(id);
+        });
+    }
+}
+
+fn labeled(model: &ModelInfo) -> (&'static str, String) {
+    let label = if model.supports_vision {
+        format!("👁\u{fe0f} {}", model.display_name)
+    } else {
+        model.display_name.to_string()
+    };
+    (model.id, label)
+}
+
+fn llm_choices(provider: AiProvider) -> Vec<(&'static str, String)> {
+    models_for_provider(provider).iter().map(labeled).collect()
+}
+
+fn vision_choices(provider: AiProvider) -> Vec<(&'static str, String)> {
+    models_for_provider(provider)
         .iter()
-        .position(|m| m.id == current_model)
-        .unwrap_or(0);
-    model_row.set_selected(idx as u32);
+        .filter(|m| m.supports_vision)
+        .map(labeled)
+        .collect()
+}
+
+fn stt_choices(provider: SttProvider) -> Vec<(&'static str, String)> {
+    stt_models_for_provider(provider)
+        .iter()
+        .map(|m| (m.id, m.display_name.to_string()))
+        .collect()
 }
 
 /// Build the settings view
@@ -119,40 +196,30 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     ai_group.add(&api_key_row);
 
     // Model selection (shows models for selected provider)
-    let model_row = adw::ComboRow::new();
-    model_row.set_title("Model");
-    model_row.set_subtitle("Vision models marked with 👁\u{fe0f}");
-    rebuild_model_list(
-        &model_row,
-        current_provider,
+    let model_picker = ModelPicker::new(&ai_group, "Model");
+    model_picker
+        .list
+        .set_subtitle("Vision models marked with 👁\u{fe0f}");
+    model_picker.show(
+        llm_choices(current_provider),
         state.borrow().settings.active_model(),
     );
 
     let state_c = state.clone();
     let debounce = save_debounce.clone();
-    let updating_c = updating.clone();
-    model_row.connect_selected_notify(move |row| {
-        if updating_c.get() {
-            return;
-        }
-        let provider = state_c.borrow().settings.provider;
-        let models = models_for_provider(provider);
-        let idx = row.selected() as usize;
-        if let Some(m) = models.get(idx) {
-            state_c
-                .borrow_mut()
-                .settings
-                .set_active_model(m.id.to_string());
-        }
+    model_picker.connect_changed(move |id| {
+        state_c
+            .borrow_mut()
+            .settings
+            .set_active_model(id.to_string());
         schedule_autosave(&debounce, &state_c);
     });
-    ai_group.add(&model_row);
 
     // Wire provider selector to update API key + model dynamically
     let state_c = state.clone();
     let debounce = save_debounce.clone();
     let api_key_c = api_key_row.clone();
-    let model_c = model_row.clone();
+    let model_c = model_picker.clone();
     let updating_c = updating.clone();
     provider_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
@@ -161,13 +228,66 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
         updating_c.set(true);
         state_c.borrow_mut().settings.provider = provider;
         api_key_c.set_text(state_c.borrow().settings.active_api_key());
-        rebuild_model_list(&model_c, provider, state_c.borrow().settings.active_model());
+        model_c.show(
+            llm_choices(provider),
+            state_c.borrow().settings.active_model(),
+        );
         updating_c.set(false);
 
         schedule_autosave(&debounce, &state_c);
     });
 
     page.add(&ai_group);
+
+    // Model for requests with images when the selected model cannot read them
+    let vision_group = adw::PreferencesGroup::new();
+    vision_group.set_title("Image Model");
+    vision_group.set_description(Some(
+        "Used when the selected model cannot read images. It uses the API key of its \
+         provider: select that provider above to enter the key.",
+    ));
+
+    let vision_provider_row = adw::ComboRow::new();
+    vision_provider_row.set_title("Provider");
+    vision_provider_row.set_model(Some(&StringList::new(&provider_names)));
+    let current_vision_provider = state.borrow().settings.vision_fallback_provider;
+    let vision_provider_idx = AiProvider::ALL
+        .iter()
+        .position(|&p| p == current_vision_provider)
+        .unwrap_or(0);
+    vision_provider_row.set_selected(vision_provider_idx as u32);
+    vision_group.add(&vision_provider_row);
+
+    let vision_picker = ModelPicker::new(&vision_group, "Model");
+    vision_picker.show(
+        vision_choices(current_vision_provider),
+        &state.borrow().settings.vision_fallback_model,
+    );
+
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    vision_picker.connect_changed(move |id| {
+        state_c.borrow_mut().settings.vision_fallback_model = id.to_string();
+        schedule_autosave(&debounce, &state_c);
+    });
+
+    let state_c = state.clone();
+    let debounce = save_debounce.clone();
+    let vision_picker_c = vision_picker.clone();
+    vision_provider_row.connect_selected_notify(move |row| {
+        let idx = row.selected() as usize;
+        let provider = AiProvider::ALL.get(idx).copied().unwrap_or_default();
+        let model = default_vision_model(provider);
+        {
+            let mut state = state_c.borrow_mut();
+            state.settings.vision_fallback_provider = provider;
+            state.settings.vision_fallback_model = model.to_string();
+        }
+        vision_picker_c.show(vision_choices(provider), model);
+        schedule_autosave(&debounce, &state_c);
+    });
+
+    page.add(&vision_group);
 
     // STT Provider group
     let stt_group = adw::PreferencesGroup::new();
@@ -209,33 +329,21 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     stt_group.add(&stt_key_row);
 
     // STT Model
-    let stt_model_row = adw::ComboRow::new();
-    stt_model_row.set_title("STT Model");
-    rebuild_stt_model_list(
-        &stt_model_row,
-        current_stt_provider,
+    let stt_model_picker = ModelPicker::new(&stt_group, "STT Model");
+    stt_model_picker.show(
+        stt_choices(current_stt_provider),
         state.borrow().settings.active_stt_model(),
     );
 
     let state_c = state.clone();
     let debounce = save_debounce.clone();
-    let stt_updating_c = stt_updating.clone();
-    stt_model_row.connect_selected_notify(move |row| {
-        if stt_updating_c.get() {
-            return;
-        }
-        let provider = state_c.borrow().settings.stt_provider;
-        let models = stt_models_for_provider(provider);
-        let idx = row.selected() as usize;
-        if let Some(m) = models.get(idx) {
-            state_c
-                .borrow_mut()
-                .settings
-                .set_active_stt_model(m.id.to_string());
-        }
+    stt_model_picker.connect_changed(move |id| {
+        state_c
+            .borrow_mut()
+            .settings
+            .set_active_stt_model(id.to_string());
         schedule_autosave(&debounce, &state_c);
     });
-    stt_group.add(&stt_model_row);
 
     page.add(&stt_group);
 
@@ -275,7 +383,7 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     let state_c = state.clone();
     let debounce = save_debounce.clone();
     let stt_key_c = stt_key_row.clone();
-    let stt_model_c = stt_model_row.clone();
+    let stt_model_c = stt_model_picker.clone();
     let stt_updating_c = stt_updating.clone();
     stt_provider_row.connect_selected_notify(move |row| {
         let idx = row.selected() as usize;
@@ -287,9 +395,8 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
             state.settings.stt_provider = provider;
         }
         stt_key_c.set_text(state_c.borrow().settings.active_stt_key());
-        rebuild_stt_model_list(
-            &stt_model_c,
-            provider,
+        stt_model_c.show(
+            stt_choices(provider),
             state_c.borrow().settings.active_stt_model(),
         );
         stt_updating_c.set(false);
