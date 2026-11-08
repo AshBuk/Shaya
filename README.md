@@ -80,20 +80,6 @@ Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT
 
 ---
 
-## Stack
-
-| Layer | Technology |
-|-------|------------|
-| Language | Rust |
-| UI | GTK4 + libadwaita |
-| Stealth | gtk4-layer-shell (`zwlr-layer-shell-v1`) |
-| AI | Groq / OpenAI / Anthropic (LLM), Groq / OpenAI (STT) |
-| Audio | PipeWire / PulseAudio via `parecord` |
-| Screenshots | grim, spectacle, gnome-screenshot, XDG Portal |
-| HTTP | ureq (blocking, background threads) |
-
----
-
 ## Documentation
 
 - [CONTRIBUTING](CONTRIBUTING.md): local development, checks before a pull request
