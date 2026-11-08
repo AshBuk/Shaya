@@ -11,7 +11,7 @@ Shaya lives as an overlay on desktop and gives you instant access to AI chat, vo
 
 Invisible to screen sharing on Wayland (as much as possible).
 
-One Rust binary. Pure GTK4. No compromises.
+One Rust binary, pure GTK4.
 
 ## Features
 
