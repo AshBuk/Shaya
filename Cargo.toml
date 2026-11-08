@@ -46,6 +46,9 @@ nix = { version = "0.29", features = ["signal"] }
 # Date/time formatting
 chrono = { version = "0.4", features = ["serde"] }
 
+[profile.release]
+strip = true
+
 [lints.rust]
 unsafe_code = "warn"
 
