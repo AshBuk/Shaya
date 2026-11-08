@@ -12,7 +12,9 @@ use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio;
 use gtk4::glib;
-use gtk4::{Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow};
+use gtk4::{
+    Box as GtkBox, Button, Label, ListBox, Orientation, PolicyType, ScrolledWindow, SelectionMode,
+};
 use libadwaita as adw;
 use libadwaita::prelude::MessageDialogExt;
 use std::cell::RefCell;
@@ -80,8 +82,14 @@ fn build_controls(
         let _ = state_c.borrow().save();
     });
 
+    // AdwSwitchRow can only be placed into a GtkListBox
+    let mic_list = ListBox::new();
+    mic_list.set_selection_mode(SelectionMode::None);
+    mic_list.add_css_class("boxed-list");
+    mic_list.append(&mic_toggle);
+
     row.append(&record_btn);
-    row.append(&mic_toggle);
+    row.append(&mic_list);
     controls.append(&row);
 
     // Status label (timer / status messages)
