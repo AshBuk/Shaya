@@ -14,6 +14,7 @@ use crate::core::live::{
     MAX_PENDING_CHUNKS,
 };
 use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
+use crate::core::utils;
 use chrono::{DateTime, Utc};
 use gtk4::gio;
 use gtk4::glib;
@@ -150,20 +151,16 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         (seq, run_id, chunk_secs)
     };
 
-    let temp_dir = std::env::temp_dir().join("shaya-live");
-    if let Err(e) = fs::create_dir_all(&temp_dir) {
-        show_status(&ctx.status_label, &format!("Live setup failed: {}", e));
-        stop(ctx, runtime);
-        return;
-    }
-    let path = temp_dir.join(format!(
-        "chunk_{}_{}_{:06}.wav",
-        std::process::id(),
-        run_id,
-        seq
-    ));
-    let mut recorder = ListenRecorder::with_path(path);
-    if let Err(e) = recorder.start() {
+    let path = match utils::temp_path("live_chunk", "wav") {
+        Ok(path) => path,
+        Err(e) => {
+            show_status(&ctx.status_label, &format!("Live setup failed: {}", e));
+            stop(ctx, runtime);
+            return;
+        }
+    };
+    let mut recorder = ListenRecorder::new();
+    if let Err(e) = recorder.start(path) {
         show_status(&ctx.status_label, &format!("Live capture failed: {}", e));
         stop(ctx, runtime);
         return;

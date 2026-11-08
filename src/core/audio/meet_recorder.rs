@@ -26,25 +26,23 @@ pub struct MeetingRecorder {
 impl MeetingRecorder {
     /// Start a new meeting recording
     pub fn start(record_mic: bool) -> Result<Self, String> {
-        let meeting = Meeting::new(record_mic);
-        let meeting_dir = MeetingManager::meeting_dir(&meeting.id);
-
-        std::fs::create_dir_all(&meeting_dir)
+        let mut meeting = Meeting::new(record_mic);
+        let meeting_dir = MeetingManager::prepare_meeting_dir(&meeting.id)
             .map_err(|e| format!("Failed to create meeting directory: {}", e))?;
 
         // System audio recorder (monitor source)
-        let system_path = meeting_dir.join("system.wav");
-        let mut system_recorder = ListenRecorder::with_path(system_path);
-        system_recorder.start()?;
+        let mut system_recorder = ListenRecorder::new();
+        system_recorder.start(meeting_dir.join("system.wav"))?;
 
         // Optional mic recorder
         let mic_recorder = if record_mic {
-            let mic_path = meeting_dir.join("mic.wav");
-            let mut mic = AudioRecorder::with_path(mic_path);
-            match mic.start() {
+            let mut mic = AudioRecorder::new();
+            match mic.start(meeting_dir.join("mic.wav")) {
                 Ok(()) => Some(mic),
                 Err(e) => {
                     tracing::warn!("Failed to start mic recording: {}", e);
+                    meeting.has_mic = false;
+                    meeting.last_error = Some(format!("Microphone not recorded: {}", e));
                     None
                 }
             }
@@ -67,15 +65,20 @@ impl MeetingRecorder {
     }
 
     /// Stop recording and finalize meeting.
-    /// WAV files are kept for transcription; call `convert_meeting_to_opus()` after.
+    /// A capture failure is recorded on the meeting so the user sees it.
     pub fn stop(&mut self) -> Result<Meeting, String> {
-        // Stop recorders
-        let _ = self.system_recorder.stop();
+        let mut problems: Vec<String> = self.meeting.last_error.take().into_iter().collect();
+        if let Err(e) = self.system_recorder.stop() {
+            problems.push(format!("System audio: {}", e));
+        }
         if let Some(ref mut mic) = self.mic_recorder {
-            let _ = mic.stop();
+            if let Err(e) = mic.stop() {
+                problems.push(format!("Microphone: {}", e));
+            }
         }
 
         // Update meeting metadata
+        self.meeting.last_error = (!problems.is_empty()).then(|| problems.join("; "));
         self.meeting.duration_secs = self.started_at.elapsed().as_secs();
         self.meeting.status = MeetingStatus::Completed;
 
@@ -100,6 +103,11 @@ impl MeetingRecorder {
     pub fn elapsed_secs(&self) -> u64 {
         self.started_at.elapsed().as_secs()
     }
+
+    /// True when system audio capture died while the meeting is still running.
+    pub fn capture_failed(&mut self) -> bool {
+        self.system_recorder.has_exited()
+    }
 }
 
 impl Drop for MeetingRecorder {
@@ -110,15 +118,15 @@ impl Drop for MeetingRecorder {
     }
 }
 
-/// Convert all WAV files in a meeting directory to OPUS, deleting originals on success.
-/// Call this AFTER transcription is complete (transcription needs the WAV files).
+/// Create OPUS copies for playback and long-term storage.
+/// Source WAVs stay until transcription succeeds: providers take WAV and can
+/// reject Opus, and only WAV can be split to fit the upload limit.
 /// Returns true if at least one file was converted.
 pub fn convert_meeting_to_opus(meeting_id: &str) -> bool {
     let dir = MeetingManager::meeting_dir(meeting_id);
     convert_wav_to_opus(&dir)
 }
 
-/// Convert all WAV files in a directory to OPUS, deleting originals on success.
 fn convert_wav_to_opus(dir: &Path) -> bool {
     let converter = find_converter();
     let converter = match converter {
@@ -149,15 +157,17 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
         }
 
         let opus_path = dir.join(name.replace(".wav", ".opus"));
-        let result = match converter {
-            Converter::Opusenc => run_opusenc(&wav_path, &opus_path),
-            Converter::Ffmpeg => run_ffmpeg(&wav_path, &opus_path),
-        };
+        let result = encode_atomically(&opus_path, |partial| match converter {
+            Converter::Opusenc => run_opusenc(&wav_path, partial),
+            Converter::Ffmpeg => run_ffmpeg(&wav_path, partial),
+        });
 
         match result {
             Ok(()) => {
-                // Delete WAV after successful conversion
-                let _ = std::fs::remove_file(&wav_path);
+                // Only the playback mix is safe to drop, transcription reads the sources.
+                if *name == "mixed.wav" {
+                    let _ = std::fs::remove_file(&wav_path);
+                }
                 tracing::info!("Converted {} to OPUS", name);
                 any_converted = true;
             }
@@ -169,6 +179,23 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
     }
 
     any_converted
+}
+
+/// Encode under a temporary name, so a file at `opus` is always complete:
+/// after transcription its presence allows deleting the source WAV.
+fn encode_atomically(
+    opus: &Path,
+    encode: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let partial = opus.with_extension("partial.opus");
+    let result = encode(&partial).and_then(|()| {
+        std::fs::rename(&partial, opus)
+            .map_err(|e| format!("Failed to save {}: {}", opus.display(), e))
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 #[derive(Clone, Copy)]
@@ -268,5 +295,40 @@ fn run_ffmpeg_mix(system_wav: &Path, mic_wav: &Path, mixed_wav: &Path) -> Result
         Ok(())
     } else {
         Err(format!("ffmpeg mix exited with {}", status))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn failed_encoder_leaves_no_opus_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let opus = dir.path().join("system.opus");
+
+        let result = encode_atomically(&opus, |partial| {
+            fs::write(partial, "truncated").unwrap();
+            Err("encoder crashed".to_string())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn finished_encoding_appears_under_the_final_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let opus = dir.path().join("system.opus");
+
+        encode_atomically(&opus, |partial| {
+            assert!(!opus.exists());
+            fs::write(partial, "audio").map_err(|e| e.to_string())
+        })
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&opus).unwrap(), "audio");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }
