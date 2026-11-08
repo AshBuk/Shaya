@@ -54,10 +54,10 @@ pub fn apply_dark_override(is_dark: bool) {
 /// Run the stealth window application
 pub fn run() -> anyhow::Result<()> {
     // Check for existing instance (no D-Bus, use lock file)
-    if !lock::acquire()? {
+    let Some(_instance_lock) = lock::acquire()? else {
         tracing::info!("Another instance is running, signaled to show window");
         return Ok(());
-    }
+    };
 
     // NON_UNIQUE = no D-Bus registration = ghost mode
     let app = adw::Application::builder()
@@ -83,10 +83,7 @@ pub fn run() -> anyhow::Result<()> {
         });
     }
 
-    app.connect_shutdown(|_| lock::release());
-
     let exit_code = app.run();
-    lock::release();
 
     if exit_code == glib::ExitCode::SUCCESS {
         Ok(())

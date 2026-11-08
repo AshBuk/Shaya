@@ -9,6 +9,7 @@
 use crate::core::api::WhisperClient;
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::state::AppState;
+use crate::core::utils;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -39,7 +40,11 @@ pub fn handle_audio_click(
 
         transcribe_and_insert(audio_path, state, status_label, entry, None);
     } else {
-        match recorder.borrow_mut().start() {
+        // A new file per recording: the previous one may still be uploading.
+        let started = utils::temp_path("voice", "wav")
+            .map_err(|e| e.to_string())
+            .and_then(|path| recorder.borrow_mut().start(path));
+        match started {
             Ok(()) => {
                 audio_btn.set_icon_name("media-playback-stop-symbolic");
                 audio_btn.add_css_class("destructive-action");
@@ -77,7 +82,10 @@ pub fn handle_listen_click(
 
         transcribe_and_insert(audio_path, state, status_label, entry, Some("🎧 [Heard]: "));
     } else {
-        match listener.borrow_mut().start() {
+        let started = utils::temp_path("listen", "wav")
+            .map_err(|e| e.to_string())
+            .and_then(|path| listener.borrow_mut().start(path));
+        match started {
             Ok(()) => {
                 listen_btn.set_icon_name("media-playback-stop-symbolic");
                 listen_btn.add_css_class("destructive-action");
@@ -110,6 +118,7 @@ fn transcribe_and_insert(
         )
     };
     if stt_key.is_empty() {
+        let _ = std::fs::remove_file(&audio_path);
         status_label.set_text("⚠️ Set STT API key in Settings");
         status_label.set_visible(true);
         return;
@@ -119,6 +128,7 @@ fn transcribe_and_insert(
     let vad_config = VadConfig::default();
     if let Some(vad_result) = analyze_audio_file(&audio_path, &vad_config) {
         if !vad_result.has_speech {
+            let _ = std::fs::remove_file(&audio_path);
             tracing::info!(
                 "VAD: No speech detected (rms={:.4}, peak={:.4})",
                 vad_result.avg_rms,
@@ -151,7 +161,9 @@ fn transcribe_and_insert(
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            client.transcribe(&audio_path).map_err(|e| e.to_string())
+            let result = client.transcribe(&audio_path).map_err(|e| e.to_string());
+            let _ = std::fs::remove_file(&audio_path);
+            result
         })
         .await;
 

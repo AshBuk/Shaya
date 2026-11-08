@@ -11,7 +11,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -23,16 +23,11 @@ pub struct ListenRecorder {
 }
 
 impl ListenRecorder {
-    /// Create a new listen recorder (default temp path)
+    /// Create an idle listen recorder
     pub fn new() -> Self {
-        Self::with_path(std::env::temp_dir().join("shaya_listen.wav"))
-    }
-
-    /// Create a new listen recorder with custom output path
-    pub fn with_path(output_path: PathBuf) -> Self {
         Self {
             process: None,
-            output_path,
+            output_path: PathBuf::new(),
             is_listening: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -42,13 +37,20 @@ impl ListenRecorder {
         self.is_listening.load(Ordering::SeqCst)
     }
 
-    /// Start listening to system audio
-    pub fn start(&mut self) -> Result<(), String> {
+    /// True when the capture process died while it should still be recording.
+    pub fn has_exited(&mut self) -> bool {
+        self.process
+            .as_mut()
+            .is_some_and(|process| matches!(process.try_wait(), Ok(Some(_))))
+    }
+
+    /// Start recording system audio into `output_path`
+    pub fn start(&mut self, output_path: PathBuf) -> Result<(), String> {
         if self.is_listening() {
             return Err("Already listening".to_string());
         }
 
-        // Remove old recording
+        self.output_path = output_path;
         let _ = fs::remove_file(&self.output_path);
 
         // Find monitor source and start recording
@@ -56,12 +58,7 @@ impl ListenRecorder {
 
         tracing::info!("Starting listen capture with {} {:?}", cmd, args);
 
-        let child = Command::new(cmd)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        let child = crate::core::utils::spawn_recorder(cmd, &args)
             .map_err(|e| format!("Failed to start listen capture: {}", e))?;
 
         self.process = Some(child);
@@ -77,14 +74,18 @@ impl ListenRecorder {
         }
 
         if let Some(mut process) = self.process.take() {
-            // Send SIGTERM to allow process to finalize WAV header
-            #[cfg(unix)]
-            #[allow(unsafe_code)]
-            unsafe {
-                libc::kill(process.id() as i32, libc::SIGTERM);
+            // Signal only a child that was not reaped yet: has_exited() may have reaped
+            // it, and its PID can already belong to another process.
+            if matches!(process.try_wait(), Ok(None)) {
+                // Send SIGTERM to allow process to finalize WAV header
+                #[cfg(unix)]
+                #[allow(unsafe_code)]
+                unsafe {
+                    libc::kill(process.id() as i32, libc::SIGTERM);
+                }
+                #[cfg(not(unix))]
+                let _ = process.kill();
             }
-            #[cfg(not(unix))]
-            let _ = process.kill();
             // Wait for process to finish writing header
             let _ = process.wait();
         }
@@ -96,6 +97,7 @@ impl ListenRecorder {
                 .map_err(|e| format!("Failed to read listen recording: {}", e))?;
 
             if metadata.len() < 100 {
+                let _ = fs::remove_file(&self.output_path);
                 return Err("Listen recording too short".to_string());
             }
 
@@ -239,5 +241,49 @@ impl Drop for ListenRecorder {
         if self.is_listening() {
             let _ = self.stop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::utils::spawn_recorder;
+    use std::time::{Duration, Instant};
+
+    fn running(cmd: &str, args: &[String], output_path: PathBuf) -> ListenRecorder {
+        ListenRecorder {
+            process: Some(spawn_recorder(cmd, args).unwrap()),
+            output_path,
+            is_listening: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    #[test]
+    fn stop_after_detected_exit_still_returns_the_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("system.wav");
+        fs::write(&path, [0u8; 200]).unwrap();
+        let mut recorder = running("true", &[], path.clone());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !recorder.has_exited() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(recorder.stop().unwrap(), path);
+    }
+
+    #[test]
+    fn stop_terminates_a_running_capture() {
+        let dir = tempfile::tempdir().unwrap();
+        let args = ["30".to_string()];
+        let mut recorder = running("sleep", &args, dir.path().join("system.wav"));
+        assert!(!recorder.has_exited());
+
+        let started = Instant::now();
+        let _ = recorder.stop();
+
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

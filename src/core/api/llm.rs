@@ -6,8 +6,8 @@
 
 //! Unified LLM client with multi-provider support (Groq, OpenAI, Anthropic)
 
-use super::ErrorResponse;
-use crate::core::models::{supports_vision, VISION_FALLBACK_MODEL};
+use super::{agent, request_error};
+use crate::core::models::{max_images, supports_effort};
 use crate::core::state::{AiProvider, Message, Role};
 use anyhow::Result;
 use serde::Deserialize;
@@ -17,6 +17,7 @@ const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const TRUNCATED_NOTE: &str = "\n\n[Response cut off at the token limit]";
 
 fn max_tokens(provider: AiProvider) -> u32 {
     match provider {
@@ -38,6 +39,10 @@ pub struct LlmClient {
 pub struct ChatOptions {
     pub anthropic_cache: bool,
     pub cache_up_to_message: Option<usize>,
+    /// Trade depth for latency on Anthropic models (Live answers).
+    pub anthropic_low_effort: bool,
+    /// Replace the default output limit
+    pub max_output_tokens: Option<u32>,
 }
 
 // OpenAI-compatible response (Groq & OpenAI)
@@ -49,22 +54,27 @@ struct ChatResponse {
 #[derive(Deserialize)]
 struct Choice {
     message: ResponseMessage,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct ResponseMessage {
-    content: String,
+    content: Option<String>,
+    refusal: Option<String>,
 }
 
 // Anthropic response
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<ContentBlock>,
+    stop_reason: Option<String>,
     usage: Option<AnthropicUsage>,
 }
 
 #[derive(Deserialize)]
 struct ContentBlock {
+    #[serde(rename = "type")]
+    kind: String,
     #[serde(default)]
     text: String,
 }
@@ -99,32 +109,28 @@ impl LlmClient {
         options: ChatOptions,
     ) -> Result<String> {
         match self.provider {
-            AiProvider::Groq => self.openai_compatible(GROQ_API_URL, messages, system_prompt),
-            AiProvider::OpenAI => self.openai_compatible(OPENAI_API_URL, messages, system_prompt),
+            AiProvider::Groq => {
+                self.openai_compatible(GROQ_API_URL, messages, system_prompt, options)
+            }
+            AiProvider::OpenAI => {
+                self.openai_compatible(OPENAI_API_URL, messages, system_prompt, options)
+            }
             AiProvider::Anthropic => self.anthropic(messages, system_prompt, options),
         }
     }
 
-    /// OpenAI-compatible chat completion (Groq & OpenAI)
-    fn openai_compatible(
+    fn output_limit(&self, options: ChatOptions) -> u32 {
+        options
+            .max_output_tokens
+            .unwrap_or_else(|| max_tokens(self.provider))
+    }
+
+    fn openai_body(
         &self,
-        url: &str,
         messages: &[Message],
         system_prompt: &str,
-    ) -> Result<String> {
-        let has_images = messages.iter().any(|m| m.image.is_some());
-        let model =
-            if has_images && self.provider == AiProvider::Groq && !supports_vision(&self.model) {
-                tracing::info!(
-                    "Image attached but {} doesn't support Vision, falling back to {}",
-                    self.model,
-                    VISION_FALLBACK_MODEL
-                );
-                VISION_FALLBACK_MODEL
-            } else {
-                &self.model
-            };
-
+        options: ChatOptions,
+    ) -> Value {
         let mut chat_messages = Vec::new();
         if !system_prompt.is_empty() {
             chat_messages.push(json!({
@@ -133,52 +139,47 @@ impl LlmClient {
             }));
         }
 
-        for msg in messages {
-            chat_messages.push(build_openai_message(msg));
+        let first_image = first_sent_image(messages, max_images(&self.model));
+        for (idx, msg) in messages.iter().enumerate() {
+            chat_messages.push(build_openai_message(msg, idx >= first_image));
         }
 
-        let request = json!({
-            "model": model,
+        let mut request = json!({
+            "model": self.model,
             "messages": chat_messages,
-            "max_tokens": max_tokens(self.provider)
         });
-
-        let response = ureq::post(url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
-            .set("Content-Type", "application/json")
-            .send_json(&request);
-
-        match response {
-            Ok(resp) => {
-                let chat_response: ChatResponse = resp.into_json()?;
-                chat_response
-                    .choices
-                    .first()
-                    .map(|c| c.message.content.clone())
-                    .ok_or_else(|| anyhow::anyhow!("No response from API"))
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                let error_text = resp
-                    .into_string()
-                    .unwrap_or_else(|_| "Unknown error".to_string());
-                let provider = self.provider.display_name();
-                if let Ok(err) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                    anyhow::bail!("{} API error ({}): {}", provider, code, err.error.message)
-                } else {
-                    anyhow::bail!("{} API error ({}): {}", provider, code, error_text)
-                }
-            }
-            Err(e) => anyhow::bail!("Request failed: {}", e),
-        }
+        let limit_field = match self.provider {
+            AiProvider::OpenAI => "max_completion_tokens",
+            _ => "max_tokens",
+        };
+        request[limit_field] = json!(self.output_limit(options));
+        request
     }
 
-    /// Anthropic Messages API
-    fn anthropic(
+    /// OpenAI-compatible chat completion (Groq & OpenAI)
+    fn openai_compatible(
         &self,
+        url: &str,
         messages: &[Message],
         system_prompt: &str,
         options: ChatOptions,
     ) -> Result<String> {
+        let response = agent()
+            .post(url)
+            .set("Authorization", &format!("Bearer {}", self.api_key))
+            .set("Content-Type", "application/json")
+            .send_json(self.openai_body(messages, system_prompt, options))
+            .map_err(|e| request_error(self.provider.display_name(), e))?;
+
+        openai_text(response.into_json()?)
+    }
+
+    fn anthropic_body(
+        &self,
+        messages: &[Message],
+        system_prompt: &str,
+        options: ChatOptions,
+    ) -> Value {
         let chat_messages: Vec<_> = messages
             .iter()
             .filter(|msg| msg.role != Role::System)
@@ -193,55 +194,103 @@ impl LlmClient {
 
         let mut request = json!({
             "model": self.model,
-            "max_tokens": max_tokens(self.provider),
+            "max_tokens": self.output_limit(options),
             "messages": chat_messages
         });
         if !system_prompt.is_empty() {
             request["system"] = anthropic_system(system_prompt, options.anthropic_cache);
         }
+        if options.anthropic_low_effort && supports_effort(&self.model) {
+            request["output_config"] = json!({ "effort": "low" });
+        }
+        request
+    }
 
-        let response = ureq::post(ANTHROPIC_API_URL)
+    /// Anthropic Messages API
+    fn anthropic(
+        &self,
+        messages: &[Message],
+        system_prompt: &str,
+        options: ChatOptions,
+    ) -> Result<String> {
+        let response = agent()
+            .post(ANTHROPIC_API_URL)
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", ANTHROPIC_VERSION)
             .set("Content-Type", "application/json")
-            .send_json(&request);
+            .send_json(self.anthropic_body(messages, system_prompt, options))
+            .map_err(|e| request_error("Anthropic", e))?;
 
-        match response {
-            Ok(resp) => {
-                let anthropic_resp: AnthropicResponse = resp.into_json()?;
-                if let Some(usage) = &anthropic_resp.usage {
-                    tracing::info!(
-                        input_tokens = ?usage.input_tokens,
-                        output_tokens = ?usage.output_tokens,
-                        cache_creation_input_tokens = ?usage.cache_creation_input_tokens,
-                        cache_read_input_tokens = ?usage.cache_read_input_tokens,
-                        "Anthropic usage"
-                    );
-                }
-                anthropic_resp
-                    .content
-                    .first()
-                    .map(|c| c.text.clone())
-                    .ok_or_else(|| anyhow::anyhow!("No response from Anthropic"))
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                let error_text = resp
-                    .into_string()
-                    .unwrap_or_else(|_| "Unknown error".to_string());
-                if let Ok(err) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                    anyhow::bail!("Anthropic API error ({}): {}", code, err.error.message)
-                } else {
-                    anyhow::bail!("Anthropic API error ({}): {}", code, error_text)
-                }
-            }
-            Err(e) => anyhow::bail!("Request failed: {}", e),
+        let anthropic_resp: AnthropicResponse = response.into_json()?;
+        if let Some(usage) = &anthropic_resp.usage {
+            tracing::info!(
+                input_tokens = ?usage.input_tokens,
+                output_tokens = ?usage.output_tokens,
+                cache_creation_input_tokens = ?usage.cache_creation_input_tokens,
+                cache_read_input_tokens = ?usage.cache_read_input_tokens,
+                "Anthropic usage"
+            );
         }
+        anthropic_text(anthropic_resp)
     }
 }
 
+fn openai_text(response: ChatResponse) -> Result<String> {
+    let choice = response
+        .choices
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("No response from API"))?;
+    if let Some(refusal) = choice.message.refusal.filter(|r| !r.is_empty()) {
+        anyhow::bail!("The model declined the request: {}", refusal);
+    }
+    let truncated = choice.finish_reason.as_deref() == Some("length");
+    finish_text(choice.message.content.unwrap_or_default(), truncated)
+}
+
+/// Replies can hold thinking and other blocks around the text, in any position.
+fn anthropic_text(response: AnthropicResponse) -> Result<String> {
+    let stop_reason = response.stop_reason.as_deref();
+    if stop_reason == Some("refusal") {
+        anyhow::bail!("The model declined the request");
+    }
+    let text = response
+        .content
+        .iter()
+        .filter(|block| block.kind == "text")
+        .map(|block| block.text.as_str())
+        .collect::<String>();
+    finish_text(text, stop_reason == Some("max_tokens"))
+}
+
+fn finish_text(text: String, truncated: bool) -> Result<String> {
+    match (text.trim().is_empty(), truncated) {
+        (true, true) => anyhow::bail!("The token limit was reached before any answer was written"),
+        (true, false) => anyhow::bail!("The API returned an empty response"),
+        (false, true) => Ok(text + TRUNCATED_NOTE),
+        (false, false) => Ok(text),
+    }
+}
+
+/// Index of the first message whose image goes into the request. Images before it stay
+/// out, so a model with an image limit keeps answering about the newest ones and a long
+/// chat does not fail. Their text and the replies about them are still sent.
+fn first_sent_image(messages: &[Message], limit: Option<usize>) -> usize {
+    let Some(limit) = limit else {
+        return 0;
+    };
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, msg)| msg.image.is_some())
+        .nth(limit)
+        .map_or(0, |(idx, _)| idx + 1)
+}
+
 /// Build OpenAI-format message JSON, embedding image as multimodal content if present
-fn build_openai_message(msg: &Message) -> serde_json::Value {
-    match &msg.image {
+fn build_openai_message(msg: &Message, with_image: bool) -> serde_json::Value {
+    match msg.image.as_ref().filter(|_| with_image) {
         Some(img) => json!({
             "role": msg.role,
             "content": [
@@ -357,6 +406,175 @@ mod tests {
             content: content.to_string(),
             image: None,
         }
+    }
+
+    fn anthropic_reply(body: Value) -> Result<String> {
+        anthropic_text(serde_json::from_value(body).unwrap())
+    }
+
+    fn openai_reply(body: Value) -> Result<String> {
+        openai_text(serde_json::from_value(body).unwrap())
+    }
+
+    #[test]
+    fn anthropic_text_skips_other_blocks() {
+        let reply = anthropic_reply(json!({
+            "stop_reason": "end_turn",
+            "content": [
+                { "type": "thinking", "thinking": "", "signature": "s" },
+                { "type": "text", "text": "Hello " },
+                { "type": "text", "text": "there" }
+            ]
+        }));
+
+        assert_eq!(reply.unwrap(), "Hello there");
+    }
+
+    #[test]
+    fn anthropic_refusal_is_an_error() {
+        let reply = anthropic_reply(json!({ "stop_reason": "refusal", "content": [] }));
+
+        assert!(reply.unwrap_err().to_string().contains("declined"));
+    }
+
+    #[test]
+    fn anthropic_thinking_only_reply_is_an_error_not_a_blank_message() {
+        let reply = anthropic_reply(json!({
+            "stop_reason": "max_tokens",
+            "content": [{ "type": "thinking", "thinking": "", "signature": "s" }]
+        }));
+
+        assert!(reply.is_err());
+    }
+
+    #[test]
+    fn truncated_reply_keeps_the_text_and_says_so() {
+        let reply = anthropic_reply(json!({
+            "stop_reason": "max_tokens",
+            "content": [{ "type": "text", "text": "partial" }]
+        }));
+
+        assert_eq!(reply.unwrap(), format!("partial{TRUNCATED_NOTE}"));
+    }
+
+    #[test]
+    fn openai_null_content_is_an_error_not_a_parse_failure() {
+        let reply = openai_reply(json!({
+            "choices": [{ "message": { "content": null }, "finish_reason": "stop" }]
+        }));
+
+        assert!(reply.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn openai_refusal_is_reported() {
+        let reply = openai_reply(json!({
+            "choices": [{
+                "message": { "content": null, "refusal": "not this" },
+                "finish_reason": "stop"
+            }]
+        }));
+
+        assert!(reply.unwrap_err().to_string().contains("not this"));
+    }
+
+    #[test]
+    fn output_limit_field_depends_on_provider() {
+        let messages = [user_message("hi")];
+        let openai = LlmClient::new(AiProvider::OpenAI, "k", "gpt-6.1-sol");
+        let groq = LlmClient::new(AiProvider::Groq, "k", "openai/gpt-oss-120b");
+
+        let openai_body = openai.openai_body(&messages, "", ChatOptions::default());
+        let groq_body = groq.openai_body(&messages, "", ChatOptions::default());
+
+        assert!(openai_body.get("max_tokens").is_none());
+        assert_eq!(openai_body["max_completion_tokens"], 16384);
+        assert_eq!(groq_body["max_tokens"], 8192);
+    }
+
+    #[test]
+    fn output_limit_can_be_lowered() {
+        let options = ChatOptions {
+            max_output_tokens: Some(100),
+            ..ChatOptions::default()
+        };
+        let messages = [user_message("hi")];
+        let openai = LlmClient::new(AiProvider::OpenAI, "k", "gpt-6.1-sol");
+        let anthropic = LlmClient::new(AiProvider::Anthropic, "k", "claude-sonnet-5-5");
+
+        assert_eq!(
+            openai.openai_body(&messages, "", options)["max_completion_tokens"],
+            100
+        );
+        assert_eq!(
+            anthropic.anthropic_body(&messages, "", options)["max_tokens"],
+            100
+        );
+    }
+
+    #[test]
+    fn anthropic_options_reach_the_request() {
+        let messages = [user_message("hi")];
+        let options = ChatOptions {
+            anthropic_low_effort: true,
+            ..ChatOptions::default()
+        };
+        let sonnet = LlmClient::new(AiProvider::Anthropic, "k", "claude-sonnet-5-5");
+        let haiku = LlmClient::new(AiProvider::Anthropic, "k", "claude-haiku-5-5");
+
+        let sonnet_body = sonnet.anthropic_body(&messages, "", options);
+        let haiku_body = haiku.anthropic_body(&messages, "", ChatOptions::default());
+
+        assert_eq!(sonnet_body["output_config"]["effort"], "low");
+        assert!(sonnet_body.get("fallbacks").is_none());
+        assert!(haiku_body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn effort_is_not_sent_to_a_custom_model() {
+        let options = ChatOptions {
+            anthropic_low_effort: true,
+            ..ChatOptions::default()
+        };
+        let custom = LlmClient::new(AiProvider::Anthropic, "k", "claude-haiku-4-5-20251001");
+
+        let body = custom.anthropic_body(&[user_message("hi")], "", options);
+
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn only_the_newest_images_fit_the_model_limit() {
+        let mut messages: Vec<_> = (0..5)
+            .map(|i| {
+                let mut msg = user_message(&i.to_string());
+                msg.image = Some(ImageData {
+                    base64_data: "abc123".to_string(),
+                    mime_type: "image/png".to_string(),
+                });
+                msg
+            })
+            .collect();
+        messages.push(user_message("no image"));
+        let image_sent = |model: &str| {
+            let client = LlmClient::new(AiProvider::Groq, "k", model);
+            let body = client.openai_body(&messages, "", ChatOptions::default());
+            body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|msg| msg["content"].is_array())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            image_sent("qwen/qwen3.8-27b"),
+            [false, false, true, true, true, false]
+        );
+        assert_eq!(
+            image_sent("my-custom-model"),
+            [true, true, true, true, true, false]
+        );
     }
 
     #[test]

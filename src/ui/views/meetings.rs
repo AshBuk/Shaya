@@ -23,6 +23,8 @@ pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
     let vbox = GtkBox::new(Orientation::Vertical, 0);
     vbox.set_vexpand(true);
 
+    MeetingManager::prepare_storage();
+
     // Shared references for clean refresh
     let recorder: Rc<RefCell<Option<MeetingRecorder>>> = Rc::new(RefCell::new(None));
     let list_container = Rc::new(GtkBox::new(Orientation::Vertical, 0));
@@ -121,13 +123,17 @@ fn build_controls(
             mic_c.set_sensitive(true);
 
             if let Some(m) = meeting {
-                status_c.set_text(&format!(
-                    "✅ Saved: {} ({})",
+                let saved = format!(
+                    "{} ({})",
                     m.title,
                     MeetingManager::format_duration(m.duration_secs)
-                ));
+                );
+                status_c.set_text(&match &m.last_error {
+                    Some(problem) => format!("⚠️ Saved with problems: {saved}: {problem}"),
+                    None => format!("✅ Saved: {saved}"),
+                });
 
-                // Convert WAV → OPUS in background (independent of transcription)
+                // Create OPUS copies in background, the WAVs stay for transcription.
                 // Set Converting status to block Transcribe button during conversion
                 if let Ok(mut meta) = MeetingManager::load(&m.id) {
                     meta.status = MeetingStatus::Converting;
@@ -180,15 +186,16 @@ fn build_controls(
                     let status_cc = status_c.clone();
                     let id =
                         glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
-                            let elapsed = recorder_cc
-                                .borrow()
-                                .as_ref()
-                                .map(|r| r.elapsed_secs())
-                                .unwrap_or(0);
-                            status_cc.set_text(&format!(
-                                "🔴 Recording: {}",
-                                MeetingManager::format_duration(elapsed)
-                            ));
+                            let (elapsed, failed) = recorder_cc
+                                .borrow_mut()
+                                .as_mut()
+                                .map_or((0, false), |r| (r.elapsed_secs(), r.capture_failed()));
+                            let duration = MeetingManager::format_duration(elapsed);
+                            status_cc.set_text(&if failed {
+                                format!("⚠️ System audio capture stopped: {duration}")
+                            } else {
+                                format!("🔴 Recording: {duration}")
+                            });
                             glib::ControlFlow::Continue
                         });
                     *timer_id_c.borrow_mut() = Some(id);
@@ -268,13 +275,20 @@ fn build_meeting_row(
     };
 
     let mic_text = if meeting.has_mic { " 🎤" } else { "" };
+    let problem = meeting
+        .last_error
+        .as_deref()
+        .map_or(String::new(), |e| format!("\n⚠️ {e}"));
+    // Provider error text is not Pango markup.
+    row.set_use_markup(false);
     row.set_subtitle(&format!(
-        "{} {} • {}{} • {}",
+        "{} {} • {}{} • {}{}",
         status_icon,
         meeting.status,
         MeetingManager::format_duration(meeting.duration_secs),
         mic_text,
-        meeting.started_at_display()
+        meeting.started_at_display(),
+        problem
     ));
 
     row.add_suffix(&build_meeting_actions(meeting, state, container));
@@ -396,6 +410,7 @@ fn build_transcription_controls(
 
             if let Ok(mut m) = MeetingManager::load(&meeting_id) {
                 m.status = MeetingStatus::Transcribing;
+                m.last_error = None;
                 let _ = MeetingManager::save(&m);
             }
 
@@ -411,20 +426,19 @@ fn build_transcription_controls(
                 })
                 .await;
 
-                let failed = match &result {
-                    Ok(Ok(_)) => false,
-                    Ok(Err(e)) => {
-                        tracing::error!("Transcription failed for {}: {}", meeting_id_c, e);
-                        true
-                    }
+                let failure = match result {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(e)) => Some(e),
                     Err(e) => {
-                        tracing::error!("Transcription task failed for {}: {:?}", meeting_id_c, e);
-                        true
+                        tracing::error!("Transcription task failed: {:?}", e);
+                        Some("Transcription task failed".to_string())
                     }
                 };
-                if failed {
+                if let Some(failure) = failure {
+                    tracing::error!("Transcription failed for {}: {}", meeting_id_c, failure);
                     if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
                         m.status = MeetingStatus::Completed;
+                        m.last_error = Some(failure);
                         let _ = MeetingManager::save(&m);
                     }
                 }
@@ -476,10 +490,20 @@ fn build_transcription_controls(
                 })
                 .await;
 
-                match result {
-                    Ok(Ok(_)) => tracing::info!("Analysis complete for {}", meeting_id_c),
-                    Ok(Err(e)) => tracing::error!("Analysis failed: {}", e),
-                    Err(e) => tracing::error!("Analysis task failed: {:?}", e),
+                let failure = match result {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(e)) => Some(e),
+                    Err(e) => {
+                        tracing::error!("Analysis task failed: {:?}", e);
+                        Some("Analysis task failed".to_string())
+                    }
+                };
+                if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
+                    if let Some(failure) = &failure {
+                        tracing::error!("Analysis failed: {}", failure);
+                    }
+                    m.last_error = failure;
+                    let _ = MeetingManager::save(&m);
                 }
 
                 rebuild_list(&container_cc, &state_cc);

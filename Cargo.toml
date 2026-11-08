@@ -1,12 +1,13 @@
 [package]
 name = "shaya"
 version = "0.1.0"
-description = "Privacy-first AI assistant with stealth mode - invisible on screen sharing."
+description = "Native AI assistant for Linux, built with Rust and GTK4."
 authors = ["Asher Buk"]
 license = "Apache-2.0"
 repository = "https://github.com/AshBuk/Shaya"
 homepage = "https://github.com/AshBuk/Shaya"
 edition = "2021"
+rust-version = "1.89"
 keywords = ["linux", "rust", "ai", "assistant", "privacy", "wayland", "gtk4"]
 categories = ["gui", "accessibility"]
 
@@ -45,6 +46,9 @@ nix = { version = "0.29", features = ["signal"] }
 
 # Date/time formatting
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 strip = true

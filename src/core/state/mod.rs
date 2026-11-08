@@ -7,14 +7,16 @@
 //! Application state with persistence
 
 use crate::core::models::{
-    DEFAULT_ANTHROPIC_MODEL, DEFAULT_GROQ_MODEL, DEFAULT_GROQ_STT_MODEL, DEFAULT_OPENAI_MODEL,
-    DEFAULT_OPENAI_STT_MODEL,
+    display_name, lacks_vision, DEFAULT_ANTHROPIC_MODEL, DEFAULT_GROQ_MODEL,
+    DEFAULT_GROQ_STT_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_OPENAI_STT_MODEL,
+    DEFAULT_VISION_FALLBACK_MODEL, LEGACY_MODELS, MODEL_CATALOG_VERSION,
 };
+use crate::core::utils;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 pub const LIVE_CHUNK_MIN_SECS: u64 = 5;
 pub const LIVE_CHUNK_MAX_SECS: u64 = 12;
@@ -61,8 +63,9 @@ impl SttProvider {
     }
 }
 
-/// Application settings
+/// Application settings. Fields missing from an older file take their default value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub provider: AiProvider,
     pub groq_api_key: String,
@@ -71,34 +74,104 @@ pub struct Settings {
     pub openai_model: String,
     pub anthropic_api_key: String,
     pub anthropic_model: String,
+    /// Serves requests with images when the selected model cannot read them
+    pub vision_fallback_provider: AiProvider,
+    pub vision_fallback_model: String,
+    /// Catalog version these settings were migrated to. A file without it predates migration.
+    #[serde(default)]
+    pub model_catalog: u32,
     pub stt_provider: SttProvider,
     pub groq_stt_api_key: String,
     pub groq_stt_model: String,
     pub openai_stt_api_key: String,
     pub openai_stt_model: String,
     pub dark_mode: bool,
-    #[serde(default = "default_opacity")]
     pub window_opacity: f64,
     /// Whether to also record microphone during meetings
-    #[serde(default)]
     pub meeting_record_mic: bool,
-    #[serde(default = "default_live_chunk_secs")]
     pub live_chunk_secs: u64,
-    #[serde(default = "default_live_auto_suggest")]
     pub live_auto_suggest: bool,
-    #[serde(default)]
     pub live_debug_transcript: bool,
-    #[serde(default = "default_window_x")]
     pub window_x: i32,
-    #[serde(default = "default_window_y")]
     pub window_y: i32,
-    #[serde(default = "default_window_width")]
     pub window_width: i32,
-    #[serde(default = "default_window_height")]
     pub window_height: i32,
 }
 
+/// Where a chat request goes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRoute {
+    pub provider: AiProvider,
+    pub api_key: String,
+    pub model: String,
+    /// The selected model cannot read images, so this request uses the image model.
+    pub image_fallback: bool,
+}
+
+impl ChatRoute {
+    /// Tells the user that images went to another model, which can be another provider.
+    pub fn image_notice(&self) -> Option<String> {
+        self.image_fallback.then(|| {
+            format!(
+                "images go to {} {}",
+                self.provider.display_name(),
+                display_name(&self.model)
+            )
+        })
+    }
+}
+
 impl Settings {
+    /// Clean up saved model IDs: blank ones, and once, IDs of earlier catalogs.
+    /// Without this, requests keep using an ID the provider no longer serves.
+    pub fn normalize_models(&mut self) {
+        let migrate = self.model_catalog < MODEL_CATALOG_VERSION;
+        let refresh = |model: &mut String, default: &str| {
+            if model.trim().is_empty() || (migrate && LEGACY_MODELS.contains(&model.as_str())) {
+                tracing::info!("Model {:?} is no longer offered, using {}", model, default);
+                *model = default.to_string();
+            }
+        };
+
+        refresh(&mut self.groq_model, DEFAULT_GROQ_MODEL);
+        refresh(&mut self.openai_model, DEFAULT_OPENAI_MODEL);
+        refresh(&mut self.anthropic_model, DEFAULT_ANTHROPIC_MODEL);
+        refresh(&mut self.groq_stt_model, DEFAULT_GROQ_STT_MODEL);
+        refresh(&mut self.openai_stt_model, DEFAULT_OPENAI_STT_MODEL);
+        if self.vision_fallback_model.trim().is_empty() {
+            self.vision_fallback_provider = AiProvider::Groq;
+            self.vision_fallback_model = DEFAULT_VISION_FALLBACK_MODEL.to_string();
+        }
+        self.model_catalog = MODEL_CATALOG_VERSION;
+    }
+
+    fn api_key_for(&self, provider: AiProvider) -> &str {
+        match provider {
+            AiProvider::Groq => &self.groq_api_key,
+            AiProvider::OpenAI => &self.openai_api_key,
+            AiProvider::Anthropic => &self.anthropic_api_key,
+        }
+    }
+
+    /// Pick the provider and model for a request
+    pub fn chat_route(&self, has_images: bool) -> ChatRoute {
+        let image_fallback = has_images && lacks_vision(self.active_model());
+        let (provider, model) = if image_fallback {
+            (
+                self.vision_fallback_provider,
+                self.vision_fallback_model.as_str(),
+            )
+        } else {
+            (self.provider, self.active_model())
+        };
+        ChatRoute {
+            provider,
+            api_key: self.api_key_for(provider).to_string(),
+            model: model.to_string(),
+            image_fallback,
+        }
+    }
+
     pub fn effective_live_chunk_secs(&self) -> u64 {
         self.live_chunk_secs
             .clamp(LIVE_CHUNK_MIN_SECS, LIVE_CHUNK_MAX_SECS)
@@ -106,11 +179,7 @@ impl Settings {
 
     /// Get API key for the active provider
     pub fn active_api_key(&self) -> &str {
-        match self.provider {
-            AiProvider::Groq => &self.groq_api_key,
-            AiProvider::OpenAI => &self.openai_api_key,
-            AiProvider::Anthropic => &self.anthropic_api_key,
-        }
+        self.api_key_for(self.provider)
     }
 
     /// Get model for the active provider
@@ -173,28 +242,6 @@ impl Settings {
     }
 }
 
-fn default_opacity() -> f64 {
-    1.0
-}
-fn default_live_chunk_secs() -> u64 {
-    10
-}
-fn default_live_auto_suggest() -> bool {
-    true
-}
-fn default_window_x() -> i32 {
-    100
-}
-fn default_window_y() -> i32 {
-    100
-}
-fn default_window_width() -> i32 {
-    400
-}
-fn default_window_height() -> i32 {
-    550
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -205,6 +252,9 @@ impl Default for Settings {
             openai_model: DEFAULT_OPENAI_MODEL.to_string(),
             anthropic_api_key: String::new(),
             anthropic_model: DEFAULT_ANTHROPIC_MODEL.to_string(),
+            vision_fallback_provider: AiProvider::Groq,
+            vision_fallback_model: DEFAULT_VISION_FALLBACK_MODEL.to_string(),
+            model_catalog: MODEL_CATALOG_VERSION,
             stt_provider: SttProvider::default(),
             groq_stt_api_key: String::new(),
             groq_stt_model: DEFAULT_GROQ_STT_MODEL.to_string(),
@@ -213,13 +263,13 @@ impl Default for Settings {
             dark_mode: true,
             window_opacity: 1.0,
             meeting_record_mic: false,
-            live_chunk_secs: default_live_chunk_secs(),
-            live_auto_suggest: default_live_auto_suggest(),
+            live_chunk_secs: 10,
+            live_auto_suggest: true,
             live_debug_transcript: false,
-            window_x: default_window_x(),
-            window_y: default_window_y(),
-            window_width: default_window_width(),
-            window_height: default_window_height(),
+            window_x: 100,
+            window_y: 100,
+            window_width: 400,
+            window_height: 550,
         }
     }
 }
@@ -234,7 +284,7 @@ pub enum Role {
 }
 
 /// Image data for Vision API (base64-encoded)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageData {
     pub base64_data: String,
     pub mime_type: String,
@@ -287,16 +337,26 @@ impl Default for SystemPrompt {
 
 /// Main application state
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppState {
     pub settings: Settings,
     pub history: Vec<Conversation>,
     pub prompts: Vec<SystemPrompt>,
     /// Active prompt IDs (multiple prompts combined for AI)
     pub active_prompt_ids: Vec<String>,
-    #[serde(default)]
     pub cheatsheets: Vec<Cheatsheet>,
     #[serde(skip)]
     pub current_messages: Vec<Message>,
+    /// Changes whenever the open chat is replaced, so a request that finishes
+    /// later can tell its result belongs to a chat that is gone.
+    #[serde(skip)]
+    pub chat_generation: u64,
+    /// Shown to the user when the saved state could not be loaded.
+    #[serde(skip)]
+    pub load_error: Option<String>,
+    /// Set when an unreadable state file could not be moved aside: saving would destroy it.
+    #[serde(skip)]
+    save_blocked: bool,
 }
 
 impl Default for AppState {
@@ -308,6 +368,9 @@ impl Default for AppState {
             active_prompt_ids: vec!["default".to_string()],
             cheatsheets: Vec::new(),
             current_messages: Vec::new(),
+            chat_generation: 0,
+            load_error: None,
+            save_blocked: false,
         }
     }
 }
@@ -315,31 +378,74 @@ impl Default for AppState {
 impl AppState {
     /// Load state from disk or create default
     pub fn load() -> Self {
-        let config_path = Self::config_path();
-        if config_path.exists() {
-            match fs::read_to_string(&config_path) {
-                Ok(content) => match serde_json::from_str(&content) {
-                    Ok(state) => return state,
-                    Err(e) => tracing::warn!("Failed to parse config: {}", e),
-                },
-                Err(e) => tracing::warn!("Failed to read config: {}", e),
+        Self::load_from(&Self::config_path())
+    }
+
+    fn load_from(path: &Path) -> Self {
+        let parsed = match fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str::<Self>(&content).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::default(),
+            Err(e) => Err(e.to_string()),
+        };
+        match parsed {
+            Ok(mut state) => {
+                state.settings.normalize_models();
+                state
             }
+            Err(reason) => Self::recover_from_unreadable(path, &reason),
         }
-        Self::default()
+    }
+
+    /// Start with defaults without losing the old file, which holds API keys and history.
+    fn recover_from_unreadable(path: &Path, reason: &str) -> Self {
+        tracing::error!("Failed to load {:?}: {}", path, reason);
+        let backup = path.with_extension(format!("corrupt-{}.json", Utc::now().timestamp()));
+        let (message, save_blocked) = match fs::rename(path, &backup) {
+            Ok(()) => (
+                format!(
+                    "Settings could not be read ({reason}). The old file was kept at {}",
+                    backup.display()
+                ),
+                false,
+            ),
+            Err(e) => (
+                format!(
+                    "Settings could not be read ({reason}) or moved aside ({e}). \
+                     Saving is off so {} stays intact",
+                    path.display()
+                ),
+                true,
+            ),
+        };
+        Self {
+            load_error: Some(message),
+            save_blocked,
+            ..Self::default()
+        }
     }
 
     /// Save state to disk
     pub fn save(&self) -> anyhow::Result<()> {
-        let config_path = Self::config_path();
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        self.save_to(&Self::config_path())
+    }
+
+    fn save_to(&self, path: &Path) -> anyhow::Result<()> {
+        if self.save_blocked {
+            anyhow::bail!("Saving is off because {} could not be read", path.display());
+        }
+        if let Some(parent) = path.parent() {
+            utils::ensure_private_dir(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&config_path, &content)?;
-        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))?;
-        tracing::info!("Settings saved to {:?}", config_path);
+        utils::write_private(path, content.as_bytes())?;
+        tracing::info!("Settings saved to {:?}", path);
         Ok(())
+    }
+
+    /// Replace the open chat. Requests started for the previous one drop their result.
+    pub fn replace_chat(&mut self, messages: Vec<Message>) {
+        self.current_messages = messages;
+        self.chat_generation += 1;
     }
 
     /// Get config file path
@@ -409,5 +515,162 @@ impl AppState {
     /// Remove cheatsheet by ID
     pub fn remove_cheatsheet(&mut self, id: &str) {
         self.cheatsheets.retain(|c| c.id != id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_in(dir: &tempfile::TempDir) -> PathBuf {
+        dir.path().join("settings.json")
+    }
+
+    #[test]
+    fn saved_state_round_trips_with_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        let mut state = AppState::default();
+        state.settings.groq_api_key = "secret".to_string();
+
+        state.save_to(&path).unwrap();
+
+        assert_eq!(
+            AppState::load_from(&path).settings.groq_api_key,
+            "secret".to_string()
+        );
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn corrupt_file_is_kept_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        fs::write(&path, r#"{"settings": {"groq_api_key": "sec"#).unwrap();
+
+        let state = AppState::load_from(&path);
+
+        assert!(state.load_error.is_some());
+        assert!(state.history.is_empty());
+        assert!(!path.exists());
+        let kept: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(kept.len(), 1);
+        let content = fs::read_to_string(kept[0].as_ref().unwrap().path()).unwrap();
+        assert!(content.contains("groq_api_key"));
+
+        // Saving defaults afterwards leaves the kept copy alone.
+        state.save_to(&path).unwrap();
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn save_is_refused_when_unreadable_file_could_not_be_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        let state = AppState {
+            save_blocked: true,
+            ..AppState::default()
+        };
+        fs::write(&path, "original").unwrap();
+
+        assert!(state.save_to(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "original");
+    }
+
+    #[test]
+    fn missing_fields_take_defaults_instead_of_resetting_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        fs::write(&path, r#"{"settings": {"groq_api_key": "kept"}}"#).unwrap();
+
+        let state = AppState::load_from(&path);
+
+        assert!(state.load_error.is_none());
+        assert_eq!(state.settings.groq_api_key, "kept");
+        assert_eq!(state.settings.window_width, 400);
+        assert_eq!(state.prompts.len(), 1);
+    }
+
+    #[test]
+    fn retired_model_ids_move_to_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        fs::write(
+            &path,
+            r#"{"settings": {
+                "groq_model": "meta-llama/llama-4-scout-17b-16e-instruct",
+                "anthropic_model": "claude-haiku-5-5"
+            }}"#,
+        )
+        .unwrap();
+
+        let settings = AppState::load_from(&path).settings;
+
+        assert_eq!(settings.groq_model, DEFAULT_GROQ_MODEL);
+        assert_eq!(settings.anthropic_model, "claude-haiku-5-5");
+    }
+
+    #[test]
+    fn custom_model_ids_survive_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = config_in(&dir);
+        let mut state = AppState::default();
+        state.settings.openai_model = "my-custom-model".to_string();
+        state.settings.anthropic_model = "claude-opus-4-6".to_string();
+        state.save_to(&path).unwrap();
+
+        let settings = AppState::load_from(&path).settings;
+
+        assert_eq!(settings.openai_model, "my-custom-model");
+        assert_eq!(settings.anthropic_model, "claude-opus-4-6");
+    }
+
+    #[test]
+    fn text_model_sends_images_to_the_configured_provider() {
+        let settings = Settings {
+            groq_api_key: "groq".to_string(),
+            anthropic_api_key: "anthropic".to_string(),
+            vision_fallback_provider: AiProvider::Anthropic,
+            vision_fallback_model: "claude-haiku-5-5".to_string(),
+            ..Settings::default()
+        };
+
+        let text = settings.chat_route(false);
+        assert_eq!(text.provider, AiProvider::Groq);
+        assert_eq!(text.model, DEFAULT_GROQ_MODEL);
+        assert_eq!(text.image_notice(), None);
+
+        let image = settings.chat_route(true);
+        assert_eq!(image.provider, AiProvider::Anthropic);
+        assert_eq!(image.api_key, "anthropic");
+        assert_eq!(image.model, "claude-haiku-5-5");
+        assert!(image.image_notice().unwrap().contains("Anthropic"));
+    }
+
+    #[test]
+    fn vision_and_custom_models_keep_their_images() {
+        let vision = Settings {
+            provider: AiProvider::Anthropic,
+            ..Settings::default()
+        };
+        let custom = Settings {
+            groq_model: "my-vision-model".to_string(),
+            ..Settings::default()
+        };
+
+        assert!(!vision.chat_route(true).image_fallback);
+        assert_eq!(custom.chat_route(true).model, "my-vision-model");
+    }
+
+    #[test]
+    fn replacing_the_chat_changes_its_generation() {
+        let mut state = AppState::default();
+        let before = state.chat_generation;
+
+        state.replace_chat(Vec::new());
+
+        assert_ne!(state.chat_generation, before);
     }
 }

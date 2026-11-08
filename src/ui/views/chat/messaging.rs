@@ -49,37 +49,64 @@ fn apply_captured_image(
     status_label.set_visible(false);
 }
 
+/// Wait for an external capture tool on a worker thread, so the UI and the
+/// Live Assistant timers keep running while the user selects an area.
+fn capture_in_background(
+    button: &Button,
+    image: &Rc<RefCell<Option<ImageData>>>,
+    status_label: &Label,
+    attach_label: &Label,
+    capture: fn() -> Result<capture::Screenshot, String>,
+    log_prefix: &'static str,
+) {
+    button.set_sensitive(false);
+    let button = button.clone();
+    let image = image.clone();
+    let status_label = status_label.clone();
+    let attach_label = attach_label.clone();
+
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(capture)
+            .await
+            .unwrap_or_else(|_| Err("Capture task failed".to_string()));
+        button.set_sensitive(true);
+        match result {
+            Ok(screenshot) => {
+                apply_captured_image(&image, &attach_label, &status_label, screenshot, log_prefix)
+            }
+            Err(e) => status_label.set_text(&format!("❌ {}", e)),
+        }
+    });
+}
+
 /// Handle area selection button click (slurp + grim)
 pub fn handle_area_capture_click(
+    button: &Button,
     image: &Rc<RefCell<Option<ImageData>>>,
     status_label: &Label,
     attach_label: &Label,
 ) {
     if capture::requires_async_portal() {
-        handle_screenshot_click(image, status_label, attach_label);
+        handle_screenshot_click(button, image, status_label, attach_label);
         return;
     }
 
     status_label.set_text("🖱️ Select area...");
     status_label.set_visible(true);
 
-    // Capture selected area (stealth-safe: slurp uses layer-shell Overlay)
-    match capture::capture_area() {
-        Ok(screenshot) => apply_captured_image(
-            image,
-            attach_label,
-            status_label,
-            screenshot,
-            "Area screenshot attached",
-        ),
-        Err(e) => {
-            status_label.set_text(&format!("❌ {}", e));
-        }
-    }
+    capture_in_background(
+        button,
+        image,
+        status_label,
+        attach_label,
+        capture::capture_area,
+        "Area screenshot attached",
+    );
 }
 
 /// Handle full screenshot button click
 pub fn handle_screenshot_click(
+    button: &Button,
     image: &Rc<RefCell<Option<ImageData>>>,
     status_label: &Label,
     attach_label: &Label,
@@ -110,46 +137,46 @@ pub fn handle_screenshot_click(
         return;
     }
 
-    // Non-portal backends remain synchronous for now.
-    match capture::take_screenshot() {
-        Ok(screenshot) => apply_captured_image(
-            image,
-            attach_label,
-            status_label,
-            screenshot,
-            "Screenshot attached",
-        ),
-        Err(e) => {
-            status_label.set_text(&format!("❌ {}", e));
-        }
-    }
+    capture_in_background(
+        button,
+        image,
+        status_label,
+        attach_label,
+        capture::take_screenshot,
+        "Screenshot attached",
+    );
 }
 
 /// Send message to AI
 pub fn send_message(ctx: &ChatContext) {
+    // Enter reaches this handler even while the send button is disabled.
+    if !ctx.send_btn.is_sensitive() {
+        return;
+    }
+
     let text = ctx.entry.text();
     let has_attachment = ctx.image.borrow().is_some();
     if text.is_empty() && !has_attachment {
         return;
     }
 
-    let (provider, api_key, model, system_prompt) = {
+    let (route, system_prompt) = {
         let s = ctx.state.borrow();
-        if s.settings.active_api_key().is_empty() {
-            ctx.status_label.set_text("⚠️ Set API key in Settings");
-            ctx.status_label.set_visible(true);
-            return;
-        }
-        (
-            s.settings.provider,
-            s.settings.active_api_key().to_string(),
-            s.settings.active_model().to_string(),
-            s.active_prompt(),
-        )
+        let has_images = has_attachment || s.current_messages.iter().any(|m| m.image.is_some());
+        (s.settings.chat_route(has_images), s.active_prompt())
     };
+    let image_notice = route.image_notice();
+    if route.api_key.is_empty() {
+        let hint = image_notice.map_or(String::new(), |notice| format!(", {notice}"));
+        ctx.status_label
+            .set_text(&format!("⚠️ Set API key in Settings{hint}"));
+        ctx.status_label.set_visible(true);
+        return;
+    }
 
     // Take the attached image (if any)
     let attached = ctx.image.borrow_mut().take();
+    let unsent_image = attached.clone();
     ctx.attach_label.set_visible(false);
 
     // Add user message with image stored inline
@@ -170,22 +197,36 @@ pub fn send_message(ctx: &ChatContext) {
     ctx.entry.set_text("");
 
     ctx.send_btn.set_sensitive(false);
-    ctx.status_label.set_text("⏳ Thinking...");
+    ctx.status_label.set_text(&match image_notice {
+        Some(notice) => format!("⏳ Thinking, {notice}..."),
+        None => "⏳ Thinking...".to_string(),
+    });
     ctx.status_label.set_visible(true);
 
-    let messages: Vec<Message> = ctx.state.borrow().current_messages.clone();
+    let (messages, generation) = {
+        let state = ctx.state.borrow();
+        (state.current_messages.clone(), state.chat_generation)
+    };
+    let user_message_index = messages.len() - 1;
     let ctx_c = ctx.clone();
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = LlmClient::new(provider, &api_key, &model);
+            let client = LlmClient::new(route.provider, &route.api_key, &route.model);
             client
                 .chat(&messages, &system_prompt)
                 .map_err(|e| e.to_string())
         })
         .await;
 
-        match result {
+        ctx_c.send_btn.set_sensitive(true);
+        // The chat was cleared or replaced while waiting: this result belongs to no open chat.
+        if ctx_c.state.borrow().chat_generation != generation {
+            ctx_c.status_label.set_visible(false);
+            return;
+        }
+
+        let failure = match result {
             Ok(Ok(response)) => {
                 ctx_c.state.borrow_mut().current_messages.push(Message {
                     role: Role::Assistant,
@@ -194,20 +235,60 @@ pub fn send_message(ctx: &ChatContext) {
                 });
                 update_chat_display(&ctx_c.chat_view, &ctx_c.state.borrow());
                 ctx_c.status_label.set_visible(false);
-                ctx_c.send_btn.set_sensitive(true);
+                return;
             }
-            Ok(Err(e)) => {
-                tracing::error!("API error: {}", e);
-                ctx_c.status_label.set_text(&format!("❌ {}", e));
-                ctx_c.send_btn.set_sensitive(true);
-            }
+            Ok(Err(e)) => e,
             Err(e) => {
                 tracing::error!("Task join error: {:?}", e);
-                ctx_c.status_label.set_text("❌ Request failed");
-                ctx_c.send_btn.set_sensitive(true);
+                "Request failed".to_string()
             }
-        }
+        };
+
+        tracing::error!("API error: {}", failure);
+        ctx_c.status_label.set_text(&format!("❌ {}", failure));
+        restore_unsent_message(&ctx_c, user_message_index, &text, unsent_image);
     });
+}
+
+/// Take a failed message out of the chat and back into the input. If it stayed,
+/// every later request would resend it, and a rejected image would block the chat.
+fn restore_unsent_message(ctx: &ChatContext, index: usize, text: &str, image: Option<ImageData>) {
+    {
+        let mut state = ctx.state.borrow_mut();
+        if index < state.current_messages.len() {
+            state.current_messages.remove(index);
+        }
+    }
+    update_chat_display(&ctx.chat_view, &ctx.state.borrow());
+
+    // The input stays editable during a request and may hold a newer draft.
+    let draft = ctx.entry.text();
+    let merged = with_unsent_text(text, &draft);
+    if merged != draft {
+        ctx.entry.set_text(&merged);
+        ctx.entry.set_position(-1);
+    }
+
+    if image.is_some() {
+        if ctx.image.borrow().is_none() {
+            *ctx.image.borrow_mut() = image;
+            ctx.attach_label.set_visible(true);
+        } else {
+            // One attachment slot, and the user chose the newer screenshot last.
+            let failure = ctx.status_label.text();
+            ctx.status_label.set_text(&format!(
+                "{failure} (unsent screenshot replaced by a newer one)"
+            ));
+        }
+    }
+}
+
+fn with_unsent_text(unsent: &str, draft: &str) -> String {
+    match (unsent.is_empty(), draft.is_empty()) {
+        (true, _) => draft.to_string(),
+        (_, true) => unsent.to_string(),
+        _ => format!("{unsent} {draft}"),
+    }
 }
 
 /// Toggle between welcome page and chat content via parent Stack.
@@ -263,4 +344,16 @@ pub fn update_chat_display(chat_view: &TextView, state: &AppState) {
         let iter = buffer.iter_at_offset(scroll_offset);
         chat_view_clone.scroll_to_iter(&mut iter.clone(), 0.0, true, 0.0, 0.0);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsent_text_survives_a_newer_draft() {
+        assert_eq!(with_unsent_text("first", ""), "first");
+        assert_eq!(with_unsent_text("first", "second"), "first second");
+        assert_eq!(with_unsent_text("", "second"), "second");
+    }
 }

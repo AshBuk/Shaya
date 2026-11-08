@@ -6,7 +6,7 @@
 
 //! Whisper STT API client (Groq, OpenAI)
 
-use super::ErrorResponse;
+use super::{agent, request_error};
 use crate::core::state::SttProvider;
 use anyhow::Result;
 use serde::Deserialize;
@@ -16,6 +16,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const GROQ_WHISPER_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const OPENAI_WHISPER_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
+const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+
+/// File name and type to upload under. Our `.opus` files are Ogg containers, and
+/// the provider upload lists name `ogg` but not `opus`.
+fn upload_identity(path: &Path) -> (String, &'static str) {
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("audio");
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("opus" | "ogg") => (format!("{stem}.ogg"), "audio/ogg"),
+        _ => (format!("{stem}.wav"), "audio/wav"),
+    }
+}
 
 /// Whisper STT client
 pub struct WhisperClient {
@@ -46,10 +60,14 @@ impl WhisperClient {
         }
 
         let audio_data = fs::read(audio_path)?;
-        let file_name = audio_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("audio.wav");
+        let (file_name, content_type) = upload_identity(audio_path);
+        if audio_data.len() > MAX_UPLOAD_BYTES {
+            anyhow::bail!(
+                "{} is {} MB, the upload limit is 25 MB",
+                audio_path.display(),
+                audio_data.len() / (1024 * 1024)
+            );
+        }
 
         tracing::info!("Transcribing {} ({} bytes)", file_name, audio_data.len());
 
@@ -70,7 +88,7 @@ impl WhisperClient {
             )
             .as_bytes(),
         );
-        body.extend_from_slice(b"Content-Type: audio/wav\r\n\r\n");
+        body.extend_from_slice(format!("Content-Type: {}\r\n\r\n", content_type).as_bytes());
         body.extend_from_slice(&audio_data);
         body.extend_from_slice(b"\r\n");
 
@@ -94,31 +112,37 @@ impl WhisperClient {
             SttProvider::OpenAI => OPENAI_WHISPER_URL,
         };
 
-        let response = ureq::post(url)
+        let response = agent()
+            .post(url)
             .set("Authorization", &format!("Bearer {}", self.api_key))
             .set(
                 "Content-Type",
                 &format!("multipart/form-data; boundary={}", boundary),
             )
-            .send_bytes(&body);
+            .send_bytes(&body)
+            .map_err(|e| request_error("Transcription", e))?;
 
-        match response {
-            Ok(resp) => {
-                let transcription: TranscriptionResponse = resp.into_json()?;
-                let text = transcription.text.trim().to_string();
-                tracing::info!("Transcription: {}", text);
-                Ok(text)
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                let error_text = resp.into_string().unwrap_or_else(|_| "Unknown".to_string());
+        let transcription: TranscriptionResponse = response.into_json()?;
+        let text = transcription.text.trim().to_string();
+        // Length only: the text itself is private and logs end up in bug reports.
+        tracing::info!("Transcription received ({} chars)", text.chars().count());
+        Ok(text)
+    }
+}
 
-                if let Ok(err) = serde_json::from_str::<ErrorResponse>(&error_text) {
-                    anyhow::bail!("Whisper API error ({}): {}", code, err.error.message)
-                } else {
-                    anyhow::bail!("Whisper API error ({}): {}", code, error_text)
-                }
-            }
-            Err(e) => anyhow::bail!("Request failed: {}", e),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opus_recordings_upload_as_ogg() {
+        assert_eq!(
+            upload_identity(Path::new("/m/system.opus")),
+            ("system.ogg".to_string(), "audio/ogg")
+        );
+        assert_eq!(
+            upload_identity(Path::new("/m/mic_chunk_001.wav")),
+            ("mic_chunk_001.wav".to_string(), "audio/wav")
+        );
     }
 }

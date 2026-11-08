@@ -9,14 +9,14 @@ Version=1.0
 Type=Application
 Name=Shaya
 GenericName=AI Assistant
-Comment=Privacy-first AI assistant with stealth mode - invisible during screen sharing
+Comment=Native AI assistant for Linux with desktop context and meeting tools
 Exec=shaya
 Icon=shaya
 Terminal=false
 Categories=Utility;Office;
-Keywords=ai;assistant;stealth;privacy;meeting;interview;invisible;
+Keywords=ai;assistant;stealth;privacy;meeting;
 
-# STEALTH: Disable all notifications to stay invisible
+# Stealth mode: no startup notification
 StartupNotify=false
 StartupWMClass=com.shaya.stealth
 

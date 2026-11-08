@@ -11,10 +11,15 @@
 
 use crate::core::api::WhisperClient;
 use crate::core::audio::chunking;
+use crate::core::utils;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+
+/// Audio sources of a meeting, in transcript order
+const SOURCES: [&str; 2] = ["system", "mic"];
 
 /// Meeting recording status
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,6 +55,9 @@ pub struct Meeting {
     pub status: MeetingStatus,
     pub has_mic: bool,
     pub audio_format: String,
+    /// Latest recording, transcription or analysis failure, shown in the meeting list
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 impl Meeting {
@@ -66,6 +74,7 @@ impl Meeting {
             status: MeetingStatus::Recording,
             has_mic,
             audio_format: "wav".to_string(),
+            last_error: None,
         }
     }
 
@@ -92,13 +101,48 @@ impl MeetingManager {
         Self::base_dir().join(meeting_id)
     }
 
+    /// Create a meeting directory only the current user can enter
+    pub fn prepare_meeting_dir(meeting_id: &str) -> io::Result<PathBuf> {
+        Self::protect_base_dir()?;
+        let dir = Self::meeting_dir(meeting_id);
+        utils::ensure_private_dir(&dir)?;
+        Ok(dir)
+    }
+
+    fn protect_base_dir() -> io::Result<()> {
+        let base = Self::base_dir();
+        if let Some(app_dir) = base.parent() {
+            utils::ensure_private_dir(app_dir)?;
+        }
+        utils::ensure_private_dir(&base)
+    }
+
+    /// Startup repair, before any recording can run: restrict access to recordings
+    /// from older versions and release meetings an interrupted run left mid-operation,
+    /// which the list offers no action for.
+    pub fn prepare_storage() {
+        if let Err(e) = Self::protect_base_dir() {
+            tracing::warn!("Failed to protect meeting storage: {}", e);
+        }
+        for mut meeting in Self::list() {
+            if matches!(
+                meeting.status,
+                MeetingStatus::Recording | MeetingStatus::Converting | MeetingStatus::Transcribing
+            ) {
+                meeting.status = MeetingStatus::Completed;
+                meeting.last_error = Some("Interrupted when Shaya closed".to_string());
+                if let Err(e) = Self::save(&meeting) {
+                    tracing::warn!("Failed to repair meeting {}: {}", meeting.id, e);
+                }
+            }
+        }
+    }
+
     /// Save meeting metadata to its directory
     pub fn save(meeting: &Meeting) -> Result<()> {
-        let dir = Self::meeting_dir(&meeting.id);
-        fs::create_dir_all(&dir)?;
-        let path = dir.join("metadata.json");
+        let dir = Self::prepare_meeting_dir(&meeting.id)?;
         let content = serde_json::to_string_pretty(meeting)?;
-        fs::write(&path, content)?;
+        utils::write_private(&dir.join("metadata.json"), content.as_bytes())?;
         tracing::info!("Meeting saved: {}", meeting.id);
         Ok(())
     }
@@ -154,8 +198,8 @@ impl MeetingManager {
 
     /// Save transcript text for a meeting
     pub fn save_transcript(meeting_id: &str, transcript: &str) -> Result<()> {
-        let path = Self::meeting_dir(meeting_id).join("transcript.txt");
-        fs::write(&path, transcript)?;
+        let path = Self::prepare_meeting_dir(meeting_id)?.join("transcript.txt");
+        utils::write_private(&path, transcript.as_bytes())?;
         Ok(())
     }
 
@@ -165,31 +209,12 @@ impl MeetingManager {
         fs::read_to_string(&path).ok()
     }
 
-    /// Save analysis text for a meeting
+    /// Save analysis text for a meeting. Fails if the meeting was deleted while the
+    /// request was running: creating its directory again would leave a file no list shows.
     pub fn save_analysis(meeting_id: &str, analysis: &str) -> Result<()> {
         let path = Self::meeting_dir(meeting_id).join("analysis.md");
-        fs::write(&path, analysis)?;
+        utils::write_private(&path, analysis.as_bytes())?;
         Ok(())
-    }
-
-    /// Find WAV files (before OPUS conversion)
-    pub fn find_wav_files(meeting_id: &str) -> Vec<PathBuf> {
-        let dir = Self::meeting_dir(meeting_id);
-        ["system.wav", "mic.wav"]
-            .iter()
-            .map(|name| dir.join(name))
-            .filter(|p| p.exists())
-            .collect()
-    }
-
-    /// Find OPUS files (after conversion)
-    pub fn find_opus_files(meeting_id: &str) -> Vec<PathBuf> {
-        let dir = Self::meeting_dir(meeting_id);
-        ["system.opus", "mic.opus"]
-            .iter()
-            .map(|name| dir.join(name))
-            .filter(|p| p.exists())
-            .collect()
     }
 
     /// Find any audio file for playback (prefers OPUS, falls back to WAV)
@@ -208,15 +233,6 @@ impl MeetingManager {
         .find(|p| p.exists())
     }
 
-    /// Find audio files for transcription: WAV first (chunkable), OPUS as fallback
-    pub fn find_transcribable_files(meeting_id: &str) -> Vec<PathBuf> {
-        let wav = Self::find_wav_files(meeting_id);
-        if !wav.is_empty() {
-            return wav;
-        }
-        Self::find_opus_files(meeting_id)
-    }
-
     /// Format duration as human-readable string
     pub fn format_duration(secs: u64) -> String {
         let hours = secs / 3600;
@@ -230,8 +246,22 @@ impl MeetingManager {
     }
 }
 
-/// Transcribe a meeting's audio files.
-/// WAV files are chunked via hound; OPUS files are sent directly to Whisper API.
+/// Pick the audio file of each source separately: WAV when it exists (it can be
+/// split to fit the upload limit), otherwise the OPUS copy.
+fn transcribable_files_in(dir: &Path) -> Vec<PathBuf> {
+    SOURCES
+        .iter()
+        .filter_map(|source| {
+            ["wav", "opus"]
+                .iter()
+                .map(|extension| dir.join(format!("{source}.{extension}")))
+                .find(|path| path.exists())
+        })
+        .collect()
+}
+
+/// Transcribe a meeting's audio files. Any failed part fails the whole operation, so the
+/// user can retry: parts that already succeeded are kept on disk and not billed twice.
 /// Call this from a blocking thread (not the GTK main loop).
 pub fn transcribe_meeting(
     meeting_id: &str,
@@ -239,72 +269,88 @@ pub fn transcribe_meeting(
     stt_api_key: &str,
     stt_model: &str,
 ) -> Result<String> {
-    let audio_files = MeetingManager::find_transcribable_files(meeting_id);
+    let meeting_dir = MeetingManager::prepare_meeting_dir(meeting_id)?;
+    let audio_files = transcribable_files_in(&meeting_dir);
     if audio_files.is_empty() {
         anyhow::bail!("No audio files found for meeting {}", meeting_id);
     }
 
-    let is_wav = audio_files
-        .first()
-        .and_then(|p| p.extension())
-        .is_some_and(|ext| ext == "wav");
-
-    let client = WhisperClient::new(stt_provider, stt_api_key, stt_model);
-    let mut full_transcript = String::new();
-    let multi_source = audio_files.len() > 1;
-
-    if is_wav {
-        // WAV: chunk with hound (handles files > 25MB)
-        let chunks_dir = chunks_dir(meeting_id);
-        let mut all_chunks: Vec<(PathBuf, &str)> = Vec::new();
-        for path in &audio_files {
-            let label = source_label(path);
-            for chunk in chunking::chunk_wav(path, &chunks_dir)? {
-                all_chunks.push((chunk, label));
+    let parts_dir = chunks_dir(meeting_id);
+    utils::ensure_private_dir(&parts_dir)?;
+    let mut parts: Vec<(PathBuf, &str)> = Vec::new();
+    for path in &audio_files {
+        let label = source_label(path);
+        if path.extension().is_some_and(|ext| ext == "wav") {
+            for chunk in chunking::chunk_wav(path, &parts_dir)? {
+                parts.push((chunk, label));
             }
-        }
-
-        let total = all_chunks.len();
-        tracing::info!("Transcribing {} WAV chunks for {}", total, meeting_id);
-
-        for (idx, (chunk_path, label)) in all_chunks.iter().enumerate() {
-            tracing::info!("Chunk {}/{}", idx + 1, total);
-            append_transcription(
-                &client,
-                chunk_path,
-                label,
-                multi_source,
-                &mut full_transcript,
-            );
-        }
-
-        cleanup_chunks(meeting_id)?;
-    } else {
-        // OPUS: send directly (Whisper accepts ogg/opus, ~14MB/hour at 32kbps)
-        tracing::info!(
-            "Transcribing {} OPUS files for {}",
-            audio_files.len(),
-            meeting_id
-        );
-        for path in &audio_files {
-            let label = source_label(path);
-            append_transcription(&client, path, label, multi_source, &mut full_transcript);
+        } else {
+            parts.push((path.clone(), label));
         }
     }
 
-    // Save transcript and update status
-    MeetingManager::save_transcript(meeting_id, &full_transcript)?;
+    tracing::info!("Transcribing {} parts for {}", parts.len(), meeting_id);
+    let client = WhisperClient::new(stt_provider, stt_api_key, stt_model);
+    let transcript = transcribe_parts(&parts, &parts_dir, audio_files.len() > 1, |path| {
+        client.transcribe(path)
+    })?;
+
+    MeetingManager::save_transcript(meeting_id, &transcript)?;
+    cleanup_chunks(meeting_id)?;
+    remove_converted_wavs(&meeting_dir);
     if let Ok(mut meeting) = MeetingManager::load(meeting_id) {
         meeting.status = MeetingStatus::Transcribed;
+        meeting.last_error = None;
         MeetingManager::save(&meeting)?;
     }
 
     tracing::info!(
         "Transcription complete for {} ({} chars)",
         meeting_id,
-        full_transcript.len()
+        transcript.len()
     );
-    Ok(full_transcript)
+    Ok(transcript)
+}
+
+/// Transcribe every part, caching each result next to the parts.
+fn transcribe_parts(
+    parts: &[(PathBuf, &str)],
+    cache_dir: &Path,
+    multi_source: bool,
+    mut transcribe: impl FnMut(&Path) -> Result<String>,
+) -> Result<String> {
+    let mut transcript = String::new();
+    let mut failures = Vec::new();
+
+    for (path, label) in parts {
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+        let cache = cache_dir.join(format!("{stem}.txt"));
+        let text = match fs::read_to_string(&cache) {
+            Ok(text) => text,
+            Err(_) => match transcribe(path) {
+                Ok(text) => {
+                    utils::write_private(&cache, text.as_bytes())?;
+                    text
+                }
+                Err(e) => {
+                    tracing::warn!("Transcription error for {}: {}", path.display(), e);
+                    failures.push(e.to_string());
+                    continue;
+                }
+            },
+        };
+        append_part(&mut transcript, &text, label, multi_source);
+    }
+
+    if let Some(first) = failures.first() {
+        anyhow::bail!(
+            "{} of {} parts failed, retry to continue: {}",
+            failures.len(),
+            parts.len(),
+            first
+        );
+    }
+    Ok(transcript)
 }
 
 /// Determine source label from audio file name
@@ -317,29 +363,25 @@ fn source_label(path: &Path) -> &'static str {
     }
 }
 
-/// Transcribe a single file and append result to transcript
-fn append_transcription(
-    client: &WhisperClient,
-    path: &Path,
-    label: &str,
-    multi_source: bool,
-    transcript: &mut String,
-) {
-    match client.transcribe(path) {
-        Ok(text) if !text.is_empty() => {
-            if !transcript.is_empty() {
-                transcript.push('\n');
-            }
-            if multi_source {
-                transcript.push_str(&format!("{} {}", label, text));
-            } else {
-                transcript.push_str(&text);
-            }
-        }
-        Ok(_) => {} // empty text, skip
-        Err(e) => {
-            tracing::warn!("Transcription error for {}: {}", path.display(), e);
-            transcript.push_str(&format!("\n[Transcription error: {}]\n", e));
+fn append_part(transcript: &mut String, text: &str, label: &str, multi_source: bool) {
+    if text.is_empty() {
+        return;
+    }
+    if !transcript.is_empty() {
+        transcript.push('\n');
+    }
+    if multi_source {
+        transcript.push_str(label);
+        transcript.push(' ');
+    }
+    transcript.push_str(text);
+}
+
+/// Transcription no longer needs the large WAVs that have a compressed copy.
+fn remove_converted_wavs(dir: &Path) {
+    for source in SOURCES {
+        if dir.join(format!("{source}.opus")).exists() {
+            let _ = fs::remove_file(dir.join(format!("{source}.wav")));
         }
     }
 }
@@ -404,4 +446,94 @@ pub fn cleanup_chunks(meeting_id: &str) -> Result<()> {
         fs::remove_dir_all(&dir)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn touch(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, "audio").unwrap();
+        path
+    }
+
+    #[test]
+    fn analysis_of_a_deleted_meeting_is_not_saved() {
+        let id = format!("meeting-deleted-{}", std::process::id());
+
+        assert!(MeetingManager::save_analysis(&id, "analysis").is_err());
+        assert!(!MeetingManager::meeting_dir(&id).exists());
+    }
+
+    #[test]
+    fn each_source_picks_its_own_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = touch(dir.path(), "system.opus");
+        let mic = touch(dir.path(), "mic.wav");
+
+        assert_eq!(transcribable_files_in(dir.path()), vec![system, mic]);
+    }
+
+    #[test]
+    fn wav_wins_over_its_opus_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = touch(dir.path(), "system.wav");
+        touch(dir.path(), "system.opus");
+
+        assert_eq!(transcribable_files_in(dir.path()), vec![wav]);
+    }
+
+    #[test]
+    fn failed_part_fails_the_operation_and_retry_only_repeats_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = touch(dir.path(), "system_chunk_000.wav");
+        let second = touch(dir.path(), "system_chunk_001.wav");
+        let parts = [(first.clone(), "[System]"), (second.clone(), "[System]")];
+        let calls = RefCell::new(Vec::new());
+
+        let failed = transcribe_parts(&parts, dir.path(), false, |path| {
+            calls.borrow_mut().push(path.to_path_buf());
+            if path == second {
+                anyhow::bail!("rate limit")
+            }
+            Ok("one".to_string())
+        });
+        assert!(failed.unwrap_err().to_string().contains("1 of 2"));
+
+        let transcript = transcribe_parts(&parts, dir.path(), false, |path| {
+            calls.borrow_mut().push(path.to_path_buf());
+            Ok("two".to_string())
+        })
+        .unwrap();
+
+        assert_eq!(transcript, "one\ntwo");
+        assert_eq!(*calls.borrow(), vec![first, second.clone(), second]);
+    }
+
+    #[test]
+    fn labels_appear_only_with_several_sources() {
+        let mut transcript = String::new();
+        append_part(&mut transcript, "hello", "[Mic]", true);
+        append_part(&mut transcript, "", "[Mic]", true);
+        assert_eq!(transcript, "[Mic] hello");
+
+        let mut single = String::new();
+        append_part(&mut single, "hello", "[Mic]", false);
+        assert_eq!(single, "hello");
+    }
+
+    #[test]
+    fn only_wavs_with_a_compressed_copy_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = touch(dir.path(), "system.wav");
+        touch(dir.path(), "system.opus");
+        let mic = touch(dir.path(), "mic.wav");
+
+        remove_converted_wavs(dir.path());
+
+        assert!(!system.exists());
+        assert!(mic.exists());
+    }
 }

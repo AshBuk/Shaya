@@ -4,9 +4,10 @@
 //
 // https://github.com/AshBuk/Shaya
 
-//! Shaya - Privacy-first AI assistant with stealth mode
+//! Shaya - Native AI assistant for Linux
 //!
-//! GTK4 + Layer-Shell for invisible screen sharing on Wayland.
+//! GTK4 + Layer-Shell overlay on Wayland. Whether it appears in screen sharing depends on
+//! the compositor, see docs/STEALTH_GUIDE.md.
 
 mod core;
 mod ui;

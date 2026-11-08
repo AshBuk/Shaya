@@ -7,16 +7,16 @@
 //! Screenshot capture for Wayland/X11
 //!
 //! Stealth behavior:
-//! - Hyprland: Shaya invisible with `layerrule = noscreenshare` (see STEALTH_GUIDE.md)
+//! - Hyprland: Shaya blacked out with the `no_screen_share` layer rule (see STEALTH_GUIDE.md)
 //! - Sway: Shaya WILL appear in screenshots (no layer filtering support)
-//! - Selection UI (slurp overlay) is always invisible during screen share
+//! - Selection UI (slurp overlay): whether a screen share shows it depends on the compositor
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -42,8 +42,7 @@ pub fn capture_area() -> Result<Screenshot, String> {
         );
     }
 
-    let output_path = std::env::temp_dir().join("shaya_area.png");
-    let _ = fs::remove_file(&output_path);
+    let output_path = screenshot_path()?;
 
     tracing::info!("Starting area selection");
 
@@ -62,10 +61,14 @@ pub fn capture_area() -> Result<Screenshot, String> {
     read_and_encode(&output_path)
 }
 
+fn screenshot_path() -> Result<PathBuf, String> {
+    crate::core::utils::temp_path("screenshot", "png")
+        .map_err(|e| format!("Failed to prepare screenshot file: {}", e))
+}
+
 /// Take a screenshot of the entire screen
 pub fn take_screenshot() -> Result<Screenshot, String> {
-    let output_path = std::env::temp_dir().join("shaya_screenshot.png");
-    let _ = fs::remove_file(&output_path);
+    let output_path = screenshot_path()?;
 
     tracing::info!("Taking full screenshot");
 
@@ -90,8 +93,7 @@ pub async fn take_screenshot_async() -> Result<Option<Screenshot>, String> {
         return take_screenshot().map(Some);
     }
 
-    let output_path = std::env::temp_dir().join("shaya_screenshot.png");
-    let _ = fs::remove_file(&output_path);
+    let output_path = screenshot_path()?;
 
     tracing::info!("Taking GNOME Wayland screenshot via XDG portal");
     if !take_gnome_wayland_screenshot_portal(&output_path).await? {
@@ -106,7 +108,9 @@ fn read_and_encode(path: &Path) -> Result<Screenshot, String> {
         return Err("Screenshot file not created".to_string());
     }
 
-    let image_data = fs::read(path).map_err(|e| format!("Failed to read screenshot: {}", e))?;
+    let image_data = fs::read(path);
+    let _ = fs::remove_file(path);
+    let image_data = image_data.map_err(|e| format!("Failed to read screenshot: {}", e))?;
 
     if image_data.len() < 100 {
         return Err("Screenshot too small or cancelled".to_string());
@@ -114,17 +118,15 @@ fn read_and_encode(path: &Path) -> Result<Screenshot, String> {
 
     tracing::info!("Screenshot captured: {} bytes", image_data.len());
 
-    let _ = fs::remove_file(path);
-
     Ok(Screenshot {
         base64_data: B64.encode(&image_data),
         mime_type: "image/png".to_string(),
     })
 }
 
-/// Capture area using slurp + grim (stealth-safe on Sway/Hyprland)
+/// Capture area using slurp + grim (wlroots compositors)
 fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
-    // Run slurp to get geometry (layer-shell Overlay → invisible in screen share)
+    // Run slurp to get geometry
     let slurp_output = Command::new("slurp")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

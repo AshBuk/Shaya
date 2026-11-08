@@ -6,7 +6,7 @@
 # https://github.com/AshBuk/Shaya
 
 # Shaya - View logs in real-time
-LOG_FILE="/tmp/shaya.log"
+LOG_FILE="${XDG_RUNTIME_DIR:-$HOME/.cache}/shaya/shaya.log"
 
 if [ ! -f "$LOG_FILE" ]; then
     echo "Log file not found: $LOG_FILE"

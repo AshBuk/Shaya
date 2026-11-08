@@ -16,7 +16,8 @@ use gtk4::ApplicationWindow;
 
 /// Initialize layer-shell for stealth mode
 ///
-/// Makes window invisible to wlr-screencopy protocol (grim, slurp).
+/// Layer-shell alone does not hide the window from capture. Whether it appears in
+/// screenshots and screen sharing depends on the compositor, see docs/STEALTH_GUIDE.md.
 #[cfg(target_os = "linux")]
 pub fn init(window: &ApplicationWindow, settings: &Settings) {
     use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};

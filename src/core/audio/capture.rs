@@ -8,7 +8,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -20,16 +20,11 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
-    /// Create a new audio recorder (default temp path)
+    /// Create an idle audio recorder
     pub fn new() -> Self {
-        Self::with_path(std::env::temp_dir().join("shaya_recording.wav"))
-    }
-
-    /// Create a new audio recorder with custom output path
-    pub fn with_path(output_path: PathBuf) -> Self {
         Self {
             process: None,
-            output_path,
+            output_path: PathBuf::new(),
             is_recording: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -39,13 +34,13 @@ impl AudioRecorder {
         self.is_recording.load(Ordering::SeqCst)
     }
 
-    /// Start recording audio
-    pub fn start(&mut self) -> Result<(), String> {
+    /// Start recording audio into `output_path`
+    pub fn start(&mut self, output_path: PathBuf) -> Result<(), String> {
         if self.is_recording() {
             return Err("Already recording".to_string());
         }
 
-        // Remove old recording
+        self.output_path = output_path;
         let _ = fs::remove_file(&self.output_path);
 
         // Try pw-record first (PipeWire), fallback to parecord (PulseAudio)
@@ -76,12 +71,7 @@ impl AudioRecorder {
 
         tracing::info!("Starting audio capture with {}", cmd);
 
-        let child = Command::new(cmd)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        let child = crate::core::utils::spawn_recorder(cmd, &args)
             .map_err(|e| format!("Failed to start {}: {}", cmd, e))?;
 
         self.process = Some(child);
@@ -117,6 +107,7 @@ impl AudioRecorder {
                 .map_err(|e| format!("Failed to read recording: {}", e))?;
 
             if metadata.len() < 100 {
+                let _ = fs::remove_file(&self.output_path);
                 return Err("Recording too short".to_string());
             }
 

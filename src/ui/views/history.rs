@@ -151,7 +151,7 @@ fn rebuild_content(
 
                 row.connect_activated(move |_| {
                     // Copy messages to current chat
-                    state_c.borrow_mut().current_messages = messages.clone();
+                    state_c.borrow_mut().replace_chat(messages.clone());
 
                     // Switch to chat view
                     stack_c.set_visible_child_name("chat");
