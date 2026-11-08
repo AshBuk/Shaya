@@ -1,4 +1,4 @@
-html<div align="center">
+<div align="center">
 <img src="icons/shaya.svg" width="180" height="180" alt="Shaya"/>
 
 # Shaya
