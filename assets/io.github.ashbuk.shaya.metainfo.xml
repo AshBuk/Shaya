@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2025 Asher Buk
+
+  SPDX-License-Identifier: Apache-2.0
+
+  https://github.com/AshBuk/Shaya
+-->
+<component type="desktop-application">
+  <id>io.github.ashbuk.shaya</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <name>Shaya</name>
+  <summary>Native AI assistant for Linux, built with Rust and GTK4</summary>
+  <description>
+    <p>
+      Shaya lives as an overlay on desktop and gives you instant access to AI chat,
+      voice transcription, screenshots, meeting recording and analysis.
+    </p>
+    <p>
+      Bring your own API key for Anthropic, OpenAI or Groq. There is no account and
+      no Shaya server: requests go directly to the provider you choose, everything
+      else stays on your machine.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>AI chat with conversation context, markdown rendering and system prompts</li>
+      <li>Microphone or system audio recording with automatic transcription</li>
+      <li>Full screen or area screenshots attached to the chat as context</li>
+      <li>Meeting recorder with transcription and AI analysis</li>
+      <li>Prompt library, cheatsheets and conversation history</li>
+      <li>Show or hide with any shortcut set in your desktop or compositor</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">shaya.desktop</launchable>
+  <icon type="stock">shaya</icon>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <url type="homepage">https://github.com/AshBuk/Shaya</url>
+  <url type="bugtracker">https://github.com/AshBuk/Shaya/issues</url>
+  <url type="vcs-browser">https://github.com/AshBuk/Shaya</url>
+  <developer id="io.github.ashbuk">
+    <name>Asher Buk</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>shaya</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-11-09"/>
+  </releases>
+</component>

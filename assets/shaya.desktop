@@ -13,7 +13,7 @@ Comment=Native AI assistant for Linux with desktop context and meeting tools
 Exec=shaya
 Icon=shaya
 Terminal=false
-Categories=Utility;Office;
+Categories=Utility;
 Keywords=ai;assistant;stealth;privacy;meeting;
 
 # Stealth mode: no startup notification
