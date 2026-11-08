@@ -9,6 +9,7 @@ logs     # View logs in real-time
 docker   # Docker build helper (interactive menu)
 lint     # cargo clippy
 fmt      # cargo fmt
+test     # cargo test
 ```
 
 ## Docker Build Options
@@ -20,10 +21,8 @@ Run `./dev docker` for interactive menu:
 2) Start container (shell)
 3) Build Shaya (cargo build --release)
 4) Check compilation (cargo check)
-5) Lint (cargo clippy)
-6) Fmt (cargo fmt)
-7) Stop container
-8) Clean all
+5) Stop container
+6) Clean all
 ```
 
 ## Local Build (requires system deps)
