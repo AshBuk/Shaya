@@ -1,4 +1,4 @@
-html<div align="center">
+<div align="center">
 <img src="icons/shaya.svg" width="180" height="180" alt="Shaya"/>
 
 # Shaya
@@ -9,7 +9,7 @@ html<div align="center">
 
 Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. A fast and quiet tool during deep work. 
 
-On Wayland it runs as a compositor overlay. Whether screen sharing shows it depends on the compositor, see the [Overlay Guide](docs/OVERLAY_GUIDE.md).
+On Wayland it runs as a compositor overlay.
 
 One Rust binary, pure GTK4.
 

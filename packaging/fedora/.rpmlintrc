@@ -1,0 +1,10 @@
+# Copyright 2025 Asher Buk
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# https://github.com/AshBuk/Shaya
+
+Filters = [
+    # Source1 is the local vendor tarball, not a URL
+    ".*invalid-url Source1.*",
+]
