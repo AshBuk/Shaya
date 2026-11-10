@@ -6,6 +6,8 @@
 
 //! Audio handlers - recording and transcription
 
+use super::messaging::input_text;
+use super::status::StatusBar;
 use crate::core::api::WhisperClient;
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::state::AppState;
@@ -13,7 +15,7 @@ use crate::core::utils;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Button, Entry, Label};
+use gtk4::{Button, TextBuffer};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,24 +23,23 @@ use std::rc::Rc;
 pub fn handle_audio_click(
     recorder: &Rc<RefCell<AudioRecorder>>,
     state: &Rc<RefCell<AppState>>,
-    status_label: &Label,
+    status: &StatusBar,
     audio_btn: &Button,
-    entry: &Entry,
+    input: &TextBuffer,
 ) {
     if recorder.borrow().is_recording() {
-        audio_btn.set_icon_name("audio-input-microphone-symbolic");
-        audio_btn.remove_css_class("destructive-action");
+        audio_btn.remove_css_class("recording");
+        status.stop_activity(audio_btn);
 
         let audio_path = match recorder.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
-                status_label.set_text(&format!("❌ {}", e));
-                status_label.set_visible(true);
+                status.error(&e.to_string());
                 return;
             }
         };
 
-        transcribe_and_insert(audio_path, state, status_label, entry, None);
+        transcribe_and_insert(audio_path, state, status, input, None);
     } else {
         // A new file per recording: the previous one may still be uploading.
         let started = utils::temp_path("voice", "wav")
@@ -46,15 +47,10 @@ pub fn handle_audio_click(
             .and_then(|path| recorder.borrow_mut().start(path));
         match started {
             Ok(()) => {
-                audio_btn.set_icon_name("media-playback-stop-symbolic");
-                audio_btn.add_css_class("destructive-action");
-                status_label.set_text("Recording...");
-                status_label.set_visible(true);
+                audio_btn.add_css_class("recording");
+                status.start_activity("Recording microphone", audio_btn, false);
             }
-            Err(e) => {
-                status_label.set_text(&format!("❌ {}", e));
-                status_label.set_visible(true);
-            }
+            Err(e) => status.error(&e),
         }
     }
 }
@@ -63,50 +59,44 @@ pub fn handle_audio_click(
 pub fn handle_listen_click(
     listener: &Rc<RefCell<ListenRecorder>>,
     state: &Rc<RefCell<AppState>>,
-    status_label: &Label,
+    status: &StatusBar,
     listen_btn: &Button,
-    entry: &Entry,
+    input: &TextBuffer,
 ) {
     if listener.borrow().is_listening() {
-        listen_btn.set_icon_name("audio-volume-high-symbolic");
-        listen_btn.remove_css_class("destructive-action");
+        listen_btn.remove_css_class("recording");
+        status.stop_activity(listen_btn);
 
         let audio_path = match listener.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
-                status_label.set_text(&format!("❌ {}", e));
-                status_label.set_visible(true);
+                status.error(&e.to_string());
                 return;
             }
         };
 
-        transcribe_and_insert(audio_path, state, status_label, entry, Some("🎧 [Heard]: "));
+        transcribe_and_insert(audio_path, state, status, input, Some("🎧 [Heard]: "));
     } else {
         let started = utils::temp_path("listen", "wav")
             .map_err(|e| e.to_string())
             .and_then(|path| listener.borrow_mut().start(path));
         match started {
             Ok(()) => {
-                listen_btn.set_icon_name("media-playback-stop-symbolic");
-                listen_btn.add_css_class("destructive-action");
-                status_label.set_text("Listening...");
-                status_label.set_visible(true);
+                listen_btn.add_css_class("recording");
+                status.start_activity("Capturing system audio", listen_btn, false);
             }
-            Err(e) => {
-                status_label.set_text(&format!("❌ {}", e));
-                status_label.set_visible(true);
-            }
+            Err(e) => status.error(&e),
         }
     }
 }
 
-/// Transcribe audio and insert result into entry field
+/// Transcribe audio and insert result into the input
 /// Uses VAD to skip transcription if no speech detected
 fn transcribe_and_insert(
     audio_path: std::path::PathBuf,
     state: &Rc<RefCell<AppState>>,
-    status_label: &Label,
-    entry: &Entry,
+    status: &StatusBar,
+    input: &TextBuffer,
     prefix: Option<&str>,
 ) {
     let (stt_provider, stt_key, stt_model) = {
@@ -119,8 +109,7 @@ fn transcribe_and_insert(
     };
     if stt_key.is_empty() {
         let _ = std::fs::remove_file(&audio_path);
-        status_label.set_text("⚠️ Set STT API key in Settings");
-        status_label.set_visible(true);
+        status.error("Set STT API key in Settings");
         return;
     }
 
@@ -134,13 +123,7 @@ fn transcribe_and_insert(
                 vad_result.avg_rms,
                 vad_result.peak
             );
-            status_label.set_text("🔇 No speech detected");
-            status_label.set_visible(true);
-            // Auto-hide after 2 seconds
-            let status_c = status_label.clone();
-            glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
-                status_c.set_visible(false);
-            });
+            status.flash("No speech detected");
             return;
         }
         tracing::info!(
@@ -151,11 +134,10 @@ fn transcribe_and_insert(
         );
     }
 
-    status_label.set_text("⏳ Transcribing...");
-    status_label.set_visible(true);
+    status.busy("Transcribing…");
 
-    let status_c = status_label.clone();
-    let entry_c = entry.clone();
+    let status = status.clone();
+    let input = input.clone();
     let prefix_owned = prefix.map(|s| s.to_string());
 
     glib::spawn_future_local(async move {
@@ -173,21 +155,17 @@ fn transcribe_and_insert(
                     Some(p) => format!("{}{}", p, text),
                     None => text,
                 };
-                let current = entry_c.text();
+                let current = input_text(&input);
                 let new_text = if current.is_empty() {
                     formatted
                 } else {
                     format!("{}\n{}", current, formatted)
                 };
-                entry_c.set_text(&new_text);
-                status_c.set_visible(false);
+                input.set_text(&new_text);
+                status.clear();
             }
-            Ok(Err(e)) => {
-                status_c.set_text(&format!("❌ {}", e));
-            }
-            Err(e) => {
-                status_c.set_text(&format!("❌ Transcription failed: {:?}", e));
-            }
+            Ok(Err(e)) => status.error(&e),
+            Err(e) => status.error(&format!("Transcription failed: {:?}", e)),
         }
     });
 }

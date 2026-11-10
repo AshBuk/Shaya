@@ -6,7 +6,9 @@
 
 //! Chat-integrated Live Assistant controls.
 
-use super::messaging;
+use super::messaging::Attachment;
+use super::status::StatusBar;
+use super::transcript::Transcript;
 use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::live::{
@@ -19,7 +21,7 @@ use chrono::{DateTime, Utc};
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
-use gtk4::{Button, Label, TextView};
+use gtk4::{Button, Label};
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
@@ -31,15 +33,13 @@ const LIVE_CONTEXT_MESSAGES: usize = 8;
 #[derive(Clone)]
 pub(super) struct LiveContext {
     pub state: Rc<RefCell<AppState>>,
-    pub chat_view: TextView,
-    pub status_label: Label,
+    pub transcript: Transcript,
+    pub status: StatusBar,
     pub transcript_label: Label,
-    pub attached_image: Rc<RefCell<Option<ImageData>>>,
-    pub attach_label: Label,
+    pub attachment: Attachment,
     pub audio_btn: Button,
     pub listen_btn: Button,
     pub live_btn: Button,
-    pub reply_btn: Button,
     pub recorder: Rc<RefCell<AudioRecorder>>,
     pub listener: Rc<RefCell<ListenRecorder>>,
 }
@@ -85,18 +85,18 @@ pub(super) fn request_manual_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRu
 
 fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     if ctx.recorder.borrow().is_recording() || ctx.listener.borrow().is_listening() {
-        show_status(&ctx.status_label, "Stop current audio capture before Live");
+        ctx.status.error("Stop current audio capture before Live");
         return;
     }
 
     let chunk_secs = {
         let state = ctx.state.borrow();
         if state.settings.active_stt_key().is_empty() {
-            show_status(&ctx.status_label, "Set STT API key in Settings");
+            ctx.status.error("Set STT API key in Settings");
             return;
         }
         if state.settings.active_api_key().is_empty() {
-            show_status(&ctx.status_label, "Set AI API key in Settings");
+            ctx.status.error("Set AI API key in Settings");
             return;
         }
         state.settings.effective_live_chunk_secs()
@@ -112,7 +112,6 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     }
 
     set_live_buttons(&ctx, true);
-    show_status(&ctx.status_label, "Live: listening");
     start_next_chunk(ctx, runtime);
 }
 
@@ -136,7 +135,6 @@ fn stop(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
 
     set_live_buttons(&ctx, false);
     ctx.transcript_label.set_visible(false);
-    show_status(&ctx.status_label, "Live: stopped");
 }
 
 fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
@@ -155,14 +153,14 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     let path = match utils::temp_path("live_chunk", "wav") {
         Ok(path) => path,
         Err(e) => {
-            show_status(&ctx.status_label, &format!("Live setup failed: {}", e));
+            ctx.status.error(&format!("Live setup failed: {}", e));
             stop(ctx, runtime);
             return;
         }
     };
     let mut recorder = ListenRecorder::new();
     if let Err(e) = recorder.start(path) {
-        show_status(&ctx.status_label, &format!("Live capture failed: {}", e));
+        ctx.status.error(&format!("Live capture failed: {}", e));
         stop(ctx, runtime);
         return;
     }
@@ -208,7 +206,7 @@ fn finish_chunk(
                 let active = live.session.is_some() && live.run_id == run_id;
                 drop(live);
                 if active {
-                    show_status(&ctx.status_label, &format!("Live chunk skipped: {}", e));
+                    ctx.status.error(&format!("Live chunk skipped: {}", e));
                     start_next_chunk(ctx, runtime);
                 }
                 return;
@@ -236,7 +234,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     let (recorder, chunk) = {
         let mut live = runtime.borrow_mut();
         if live.session.is_none() {
-            show_status(&ctx.status_label, "Live is not active");
+            ctx.status.error("Live is not active");
             return;
         }
         if live
@@ -244,7 +242,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             .as_ref()
             .is_some_and(|session| session.in_flight.is_some())
         {
-            show_status(&ctx.status_label, "Live: thinking");
+            ctx.status.activity("Live · thinking");
             return;
         }
         (live.recorder.take(), live.active_chunk.take())
@@ -261,7 +259,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             process_chunk(ctx, runtime, chunk, audio_path, true);
         }
         Err(e) => {
-            show_status(&ctx.status_label, &format!("Live flush skipped: {}", e));
+            ctx.status.error(&format!("Live flush skipped: {}", e));
             finish_force_reply(ctx, runtime, Some(chunk.seq));
         }
     }
@@ -289,8 +287,7 @@ fn process_chunk(
         )
     };
 
-    ctx.status_label.set_text("Live: transcribing");
-    ctx.status_label.set_visible(true);
+    ctx.status.activity("Live · transcribing");
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
@@ -331,13 +328,13 @@ fn process_chunk(
                 }
             }
             Ok(Err(e)) => {
-                show_status(&ctx.status_label, &format!("Live STT failed: {}", e));
+                ctx.status.error(&format!("Live STT failed: {}", e));
                 if force_reply_after {
                     finish_force_reply(ctx, runtime, Some(seq));
                 }
             }
             Err(e) => {
-                show_status(&ctx.status_label, &format!("Live STT task failed: {:?}", e));
+                ctx.status.error(&format!("Live STT task failed: {:?}", e));
                 if force_reply_after {
                     finish_force_reply(ctx, runtime, Some(seq));
                 }
@@ -375,7 +372,7 @@ fn handle_speech_chunk(
         return;
     }
 
-    show_status(&ctx.status_label, "Live: listening");
+    ctx.status.activity("Live · listening");
 }
 
 fn handle_silent_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, seq: u64) {
@@ -385,7 +382,7 @@ fn handle_silent_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, seq:
     if should_trigger {
         request_answer(ctx, runtime, false);
     } else if runtime.borrow().is_active() {
-        show_status(&ctx.status_label, "Live: listening");
+        ctx.status.activity("Live · listening");
     }
 }
 
@@ -406,7 +403,7 @@ fn finish_force_reply(
     if closed || has_closed_transcript {
         request_answer(ctx.clone(), runtime.clone(), true);
     } else {
-        show_status(&ctx.status_label, "Live: no new transcript");
+        ctx.status.activity("Live · no new transcript");
     }
     if runtime.borrow().is_active() {
         start_next_chunk(ctx, runtime);
@@ -455,16 +452,16 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     let (run_id, range, transcript_text) = {
         let mut live = runtime.borrow_mut();
         let Some(session) = live.session.as_mut() else {
-            show_status(&ctx.status_label, "Live is not active");
+            ctx.status.error("Live is not active");
             return;
         };
         if session.in_flight.is_some() {
-            show_status(&ctx.status_label, "Live: thinking");
+            ctx.status.activity("Live · thinking");
             return;
         }
         let Some(range) = session.pending_range() else {
             if manual {
-                show_status(&ctx.status_label, "Live: no new transcript");
+                ctx.status.activity("Live · no new transcript");
             }
             return;
         };
@@ -477,7 +474,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         let state = ctx.state.borrow();
         // Only images that reach the request choose the model. The image model applies
         // to a text-only main model, so the main provider's context decides.
-        let has_images = ctx.attached_image.borrow().is_some()
+        let has_images = ctx.attachment.image.borrow().is_some()
             || live_context(&state.current_messages, state.settings.provider)
                 .iter()
                 .any(|m| m.image.is_some());
@@ -499,15 +496,13 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     if route.api_key.is_empty() {
         clear_in_flight(&runtime, range);
         let hint = image_notice.map_or(String::new(), |notice| format!(", {notice}"));
-        show_status(
-            &ctx.status_label,
-            &format!("Set AI API key in Settings{hint}"),
-        );
+        ctx.status
+            .error(&format!("Set AI API key in Settings{hint}"));
         return;
     }
 
     let pending_message =
-        live_transcript_message(transcript_text, ctx.attached_image.borrow().clone());
+        live_transcript_message(transcript_text, ctx.attachment.image.borrow().clone());
     messages.push(pending_message.clone());
     let options = ChatOptions {
         anthropic_cache: route.provider == AiProvider::Anthropic,
@@ -516,13 +511,10 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         ..ChatOptions::default()
     };
 
-    show_status(
-        &ctx.status_label,
-        &match image_notice {
-            Some(notice) => format!("Live: thinking, {notice}"),
-            None => "Live: thinking".to_string(),
-        },
-    );
+    ctx.status.activity(&match image_notice {
+        Some(notice) => format!("Live · thinking, {notice}"),
+        None => "Live · thinking".to_string(),
+    });
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::new(route.provider, &route.api_key, &route.model);
@@ -542,11 +534,11 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
             }
             Ok(Err(e)) => {
                 clear_in_flight(&runtime, range);
-                show_status(&ctx.status_label, &format!("Live LLM failed: {}", e));
+                ctx.status.error(&format!("Live LLM failed: {}", e));
             }
             Err(e) => {
                 clear_in_flight(&runtime, range);
-                show_status(&ctx.status_label, &format!("Live LLM task failed: {:?}", e));
+                ctx.status.error(&format!("Live LLM task failed: {:?}", e));
             }
         }
     });
@@ -571,17 +563,17 @@ fn apply_live_response(
             reschedule = session.pending_range().is_some();
         } else if is_no_suggestion(&response) {
             session.mark_evaluated(range);
-            show_status(&ctx.status_label, "Live: no suggestion");
+            ctx.status.activity("Live · no suggestion");
         } else if ctx.state.borrow().chat_generation != generation {
             // The chat this answer belongs to was cleared or replaced.
             session.mark_evaluated(range);
-            show_status(&ctx.status_label, "Live: listening");
+            ctx.status.activity("Live · listening");
         } else {
             if clear_answered_image(
-                &mut ctx.attached_image.borrow_mut(),
+                &mut ctx.attachment.image.borrow_mut(),
                 pending_message.image.as_ref(),
             ) {
-                ctx.attach_label.set_visible(false);
+                ctx.attachment.sync();
             }
             let mut state = ctx.state.borrow_mut();
             state.current_messages.push(pending_message);
@@ -591,8 +583,8 @@ fn apply_live_response(
                 image: None,
             });
             session.mark_evaluated(range);
-            messaging::update_chat_display(&ctx.chat_view, &state);
-            show_status(&ctx.status_label, "Live: answered");
+            ctx.transcript.update(&state);
+            ctx.status.activity("Live · answered");
         }
     }
 
@@ -681,24 +673,16 @@ fn update_transcript_preview(ctx: &LiveContext, session: &LiveSession) {
 }
 
 fn set_live_buttons(ctx: &LiveContext, active: bool) {
-    ctx.live_btn.set_icon_name(if active {
-        "media-playback-stop-symbolic"
-    } else {
-        "network-wireless-symbolic"
-    });
     if active {
-        ctx.live_btn.add_css_class("destructive-action");
+        ctx.live_btn.add_css_class("recording");
+        ctx.status
+            .start_activity("Live · listening", &ctx.live_btn, true);
     } else {
-        ctx.live_btn.remove_css_class("destructive-action");
+        ctx.live_btn.remove_css_class("recording");
+        ctx.status.stop_activity(&ctx.live_btn);
     }
-    ctx.reply_btn.set_sensitive(active);
     ctx.audio_btn.set_sensitive(!active);
     ctx.listen_btn.set_sensitive(!active);
-}
-
-fn show_status(status_label: &Label, text: &str) {
-    status_label.set_text(text);
-    status_label.set_visible(true);
 }
 
 #[cfg(test)]

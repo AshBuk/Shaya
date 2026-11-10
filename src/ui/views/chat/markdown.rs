@@ -211,13 +211,46 @@ pub fn render(buffer: &TextBuffer, text: &str) {
     parser.parse(text);
 }
 
-/// Render markdown, appending to existing buffer content.
-/// Returns the char offset where this chunk started.
-pub fn render_append(buffer: &TextBuffer, text: &str) -> i32 {
-    let start_offset = buffer.end_iter().offset();
-    let mut parser = Parser::new(buffer);
-    parser.parse(text);
-    start_offset
+/// A part of a message: code blocks get their own surface in the chat.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Block {
+    Text(String),
+    Code { lang: String, code: String },
+}
+
+/// Split markdown into text and fenced code blocks.
+pub fn split_blocks(text: &str) -> Vec<Block> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut blocks = Vec::new();
+    let mut text_start = 0;
+    let mut i = 0;
+
+    while i < lines.len() {
+        let Some(lang) = lines[i].strip_prefix("```") else {
+            i += 1;
+            continue;
+        };
+        push_text_block(&mut blocks, &lines[text_start..i]);
+        let (code, next) = collect_code_block(&lines, i);
+        if !code.is_empty() {
+            blocks.push(Block::Code {
+                lang: lang.trim().to_string(),
+                code,
+            });
+        }
+        i = next;
+        text_start = next;
+    }
+    push_text_block(&mut blocks, &lines[text_start..]);
+    blocks
+}
+
+fn push_text_block(blocks: &mut Vec<Block>, lines: &[&str]) {
+    let text = lines.join("\n");
+    let text = text.trim_matches('\n');
+    if !text.trim().is_empty() {
+        blocks.push(Block::Text(text.to_string()));
+    }
 }
 
 /// Parser state machine for markdown
@@ -827,6 +860,27 @@ mod tests {
 
         assert_eq!(code, "fn main() {}");
         assert_eq!(next, 3);
+    }
+
+    #[test]
+    fn splits_messages_around_code_blocks() {
+        let blocks = split_blocks("Before\n\n```rust\nfn main() {}\n```\n\nAfter\n```\nopen");
+
+        assert_eq!(
+            blocks,
+            vec![
+                Block::Text("Before".to_string()),
+                Block::Code {
+                    lang: "rust".to_string(),
+                    code: "fn main() {}".to_string(),
+                },
+                Block::Text("After".to_string()),
+                Block::Code {
+                    lang: String::new(),
+                    code: "open".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]

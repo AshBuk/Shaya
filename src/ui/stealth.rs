@@ -11,15 +11,12 @@
 //!
 //! See docs/OVERLAY_GUIDE.md for setup.
 
-use super::{header, layer_shell, views};
+use super::{header, layer_shell, theme, views};
 use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio::ApplicationFlags;
-use gtk4::{
-    gdk, glib, ApplicationWindow, Box as GtkBox, CssProvider, GestureDrag, Label, Orientation,
-    Overlay,
-};
+use gtk4::{gdk, glib, ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, Overlay};
 use libadwaita as adw;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -32,23 +29,6 @@ thread_local! {
     static MAIN_WINDOW: RefCell<Option<ApplicationWindow>> = const { RefCell::new(None) };
     static MAIN_STATE: RefCell<Option<Rc<RefCell<AppState>>>> = const { RefCell::new(None) };
     static WINDOW_HIDDEN: Cell<bool> = const { Cell::new(false) };
-    static THEME_CSS: RefCell<Option<CssProvider>> = const { RefCell::new(None) };
-}
-
-const DARK_OVERRIDES: &str = "@define-color window_bg_color #141414;
-     @define-color view_bg_color #1a1a1a;
-     @define-color headerbar_bg_color #0f0f0f;
-     @define-color card_bg_color #1e1e1e;
-     @define-color popover_bg_color #1e1e1e;
-     @define-color sidebar_bg_color #141414;";
-
-/// Reload theme CSS (call on dark mode toggle)
-pub fn apply_dark_override(is_dark: bool) {
-    THEME_CSS.with(|t| {
-        if let Some(css) = t.borrow().as_ref() {
-            css.load_from_data(if is_dark { DARK_OVERRIDES } else { "" });
-        }
-    });
 }
 
 /// Run the stealth window application
@@ -94,29 +74,7 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Build the main UI
 fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
-    // Load custom CSS
-    let css = CssProvider::new();
-    css.load_from_data(
-        ".header-bar { border-bottom: 1px solid alpha(currentColor, 0.08); }
-         .control-panel { border-top: 1px solid alpha(currentColor, 0.08); }",
-    );
-    let theme_css = CssProvider::new();
-    if state.borrow().settings.dark_mode {
-        theme_css.load_from_data(DARK_OVERRIDES);
-    }
-    if let Some(display) = gdk::Display::default() {
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &css,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &theme_css,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
-        );
-    }
-    THEME_CSS.with(|t| *t.borrow_mut() = Some(theme_css));
+    theme::init(&state.borrow().settings);
 
     let (window_width, window_height) = {
         let s = state.borrow();
@@ -127,6 +85,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
         .title("Shaya")
         .default_width(window_width)
         .default_height(window_height)
+        .css_classes(["shaya"])
         .build();
 
     // Set minimum window size (allows flexible resizing)
@@ -140,13 +99,23 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     layer_shell::init(&window, &state.borrow().settings);
 
     // Apply saved appearance settings
-    apply_appearance_settings(&window, &state);
+    apply_color_scheme(state.borrow().settings.dark_mode);
 
     // Build UI structure
     let main_box = GtkBox::new(Orientation::Vertical, 0);
+    main_box.add_css_class("shaya-surface");
+    main_box.set_overflow(gtk4::Overflow::Hidden);
+    // A normal window already has a frame from the compositor or GTK.
+    #[cfg(target_os = "linux")]
+    {
+        use gtk4_layer_shell::LayerShell;
+        if window.is_layer_window() {
+            main_box.add_css_class("floating");
+        }
+    }
 
     // Create ViewStack first (needed by header for navigation)
-    let (stack, chat_shared) = build_view_stack(&window, state.clone());
+    let (stack, chat_shared) = build_view_stack(state.clone());
 
     // Header bar (navigation + drag handle)
     let header = header::build(&window, &stack, state.clone());
@@ -159,128 +128,108 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     main_box.append(&content_box);
 
     // Control panel (chat input)
-    let control_panel = build_control_panel(&stack, state.clone(), chat_shared);
+    let control_panel = build_control_panel(&window, &stack, state.clone(), chat_shared);
     main_box.append(&control_panel);
 
-    // Wrap in overlay for drag + resize handles
+    // Wrap in overlay for the resize handle
     let overlay = Overlay::new();
     overlay.set_child(Some(&main_box));
+    overlay.add_overlay(&build_resize_handle(&window, state.clone()));
 
-    // Drag handle (bottom-left)
-    let drag_handle = build_drag_handle(&window, state.clone());
-    overlay.add_overlay(&drag_handle);
-
-    // Resize handle (bottom-right)
-    let resize_handle = build_resize_handle(&window, state);
-    overlay.add_overlay(&resize_handle);
-
-    window.set_child(Some(&overlay));
+    super::orbit::install(&window, &overlay, &stack, state);
     window.present();
 }
 
-/// Build ViewStack with all views
+/// Build ViewStack with all views. Its pages, in this order, are the sections
+/// every navigation shows (see `header::sections`).
 fn build_view_stack(
-    window: &ApplicationWindow,
     state: Rc<RefCell<AppState>>,
 ) -> (adw::ViewStack, views::chat::ChatSharedState) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
+    let add = |child: &gtk4::Widget, name: &str, title: &str, icon: &str| {
+        stack
+            .add_titled(child, Some(name), title)
+            .set_icon_name(Some(icon));
+    };
 
-    // Chat view
     let (chat, chat_shared) = views::chat::build_content(state.clone());
-    stack.add_titled(&chat, Some("chat"), "Chat");
-    stack.page(&chat).set_icon_name(Some("go-home-symbolic"));
+    add(chat.upcast_ref(), "chat", "Chat", "go-home-symbolic");
 
-    // Cheatsheets view
-    let cheatsheets = views::cheatsheets::build(state.clone());
-    stack.add_titled(&cheatsheets, Some("cheatsheets"), "Cheatsheets");
-    stack
-        .page(&cheatsheets)
-        .set_icon_name(Some("text-x-generic-symbolic"));
-
-    // Prompts view
-    let prompts = views::prompts::build(state.clone());
-    stack.add_titled(&prompts, Some("prompts"), "Prompts");
-    stack
-        .page(&prompts)
-        .set_icon_name(Some("accessories-text-editor-symbolic"));
-
-    // History view (needs stack reference and chat_view for refresh)
-    let history = views::history::build(state.clone(), &stack, &chat_shared.chat_view);
-    stack.add_titled(&history, Some("history"), "History");
-    stack
-        .page(&history)
-        .set_icon_name(Some("document-open-recent-symbolic"));
-
-    // Settings view (needs window reference for opacity control)
-    let settings = views::settings::build(window, state.clone());
-    stack.add_titled(&settings, Some("settings"), "Settings");
-    stack
-        .page(&settings)
-        .set_icon_name(Some("emblem-system-symbolic"));
-
-    // Meetings view
     let meetings = views::meetings::build(state.clone(), &stack);
-    stack.add_titled(&meetings, Some("meetings"), "Meetings");
-    stack
-        .page(&meetings)
-        .set_icon_name(Some("media-record-symbolic"));
+    add(
+        meetings.upcast_ref(),
+        "meetings",
+        "Meetings",
+        "media-record-symbolic",
+    );
+
+    // History needs the transcript to refresh it
+    let history = views::history::build(state.clone(), &stack, &chat_shared.transcript);
+    add(
+        history.upcast_ref(),
+        "history",
+        "History",
+        "document-open-recent-symbolic",
+    );
+
+    let prompts = views::prompts::build(state.clone());
+    add(
+        prompts.upcast_ref(),
+        "prompts",
+        "Prompts",
+        "accessories-text-editor-symbolic",
+    );
+
+    let cheatsheets = views::cheatsheets::build(state.clone());
+    add(
+        cheatsheets.upcast_ref(),
+        "cheatsheets",
+        "Notes",
+        "text-x-generic-symbolic",
+    );
+
+    let settings = views::settings::build(state.clone());
+    add(
+        settings.upcast_ref(),
+        "settings",
+        "Settings",
+        "emblem-system-symbolic",
+    );
 
     (stack, chat_shared)
 }
 
 /// Build control panel (chat input area)
 fn build_control_panel(
+    window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
     chat_shared: views::chat::ChatSharedState,
 ) -> GtkBox {
-    let panel = GtkBox::new(Orientation::Vertical, 4);
+    let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.set_margin_top(4);
-    panel.set_margin_bottom(8);
-    panel.set_margin_start(8);
-    panel.set_margin_end(8);
-    panel.add_css_class("control-panel");
+    panel.set_margin_bottom(10);
+    panel.set_margin_start(10);
+    panel.set_margin_end(10);
 
-    let input_area = views::chat::build_input(state.clone(), stack, chat_shared);
-    panel.append(&input_area);
+    panel.append(&views::chat::build_input(window, state, stack, chat_shared));
 
     // Show only when chat view is active
-    let input_c = input_area.clone();
+    let panel_c = panel.clone();
     stack.connect_visible_child_name_notify(move |s| {
-        input_c.set_visible(s.visible_child_name().as_deref() == Some("chat"));
+        panel_c.set_visible(s.visible_child_name().as_deref() == Some("chat"));
     });
 
     panel
 }
 
-/// ⋮⋮ Build drag handle (bottom-left)
-fn build_drag_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
-    let drag_box = GtkBox::new(Orientation::Horizontal, 0);
-    drag_box.set_halign(gtk4::Align::Start);
-    drag_box.set_valign(gtk4::Align::End);
-    drag_box.set_margin_start(8);
-    drag_box.set_margin_bottom(8);
-    drag_box.set_cursor_from_name(Some("grab"));
-
-    let label = Label::new(Some("⋮⋮"));
-    label.add_css_class("dim-label");
-    label.set_tooltip_text(Some("Drag to move"));
-    drag_box.append(&label);
-
-    header::setup_drag_gesture(&drag_box, window, state);
-
-    drag_box
-}
-
-/// ⤡ Build resize (bottom-right)
-fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> Label {
-    let handle = Label::new(Some("⤡"));
+/// Build resize grip (bottom-right corner)
+fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
+    let handle = GtkBox::new(Orientation::Horizontal, 0);
+    handle.add_css_class("resize-grip");
     handle.set_halign(gtk4::Align::End);
     handle.set_valign(gtk4::Align::End);
-    handle.set_margin_end(8);
-    handle.set_margin_bottom(8);
-    handle.add_css_class("dim-label");
     handle.set_cursor_from_name(Some("se-resize"));
     handle.set_tooltip_text(Some("Drag to resize"));
 
@@ -357,17 +306,11 @@ fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>)
     handle
 }
 
-/// Apply appearance settings from saved state
-fn apply_appearance_settings(window: &ApplicationWindow, state: &Rc<RefCell<AppState>>) {
-    let settings = &state.borrow().settings;
-
-    // Apply opacity
-    window.set_opacity(settings.window_opacity);
-
-    // Apply dark mode
+/// Apply the saved color scheme
+fn apply_color_scheme(is_dark: bool) {
     if let Some(display) = gtk4::gdk::Display::default() {
         let style_manager = adw::StyleManager::for_display(&display);
-        style_manager.set_color_scheme(if settings.dark_mode {
+        style_manager.set_color_scheme(if is_dark {
             adw::ColorScheme::ForceDark
         } else {
             adw::ColorScheme::ForceLight

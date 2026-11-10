@@ -9,47 +9,52 @@
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gdk;
-use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, ToggleButton};
+use gtk4::gio;
+use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Label, MenuButton, Orientation};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// Build header bar with navigation and drag handle
+/// Build header bar: section menu, current section, chat actions, hide
 pub fn build(
     window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
 ) -> GtkBox {
-    let header = GtkBox::new(Orientation::Horizontal, 4);
-    header.set_margin_top(4);
-    header.set_margin_bottom(4);
-    header.set_margin_start(8);
-    header.set_margin_end(8);
-    header.add_css_class("header-bar");
+    let header = GtkBox::new(Orientation::Horizontal, 2);
+    header.add_css_class("shaya-header");
 
-    // Drag indicator (left)
-    let drag_icon = gtk4::Label::new(Some("⋮⋮"));
-    drag_icon.add_css_class("dim-label");
-    drag_icon.set_tooltip_text(Some("Drag to move"));
-    header.append(&drag_icon);
+    header.append(&build_navigation(window, stack));
 
-    // Spacer left
-    let spacer_left = GtkBox::new(Orientation::Horizontal, 0);
-    spacer_left.set_hexpand(true);
-    header.append(&spacer_left);
+    let brand = Label::new(Some("shaya"));
+    brand.add_css_class("shaya-wordmark");
+    header.append(&brand);
 
-    // Navigation buttons
-    let nav = build_navigation(stack);
-    header.append(&nav);
+    let title = Label::new(None);
+    title.add_css_class("shaya-title");
+    title.set_hexpand(true);
+    title.set_xalign(0.0);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    header.append(&title);
 
-    // Spacer right
-    let spacer_right = GtkBox::new(Orientation::Horizontal, 0);
-    spacer_right.set_hexpand(true);
-    header.append(&spacer_right);
+    let chat_menu = build_chat_menu();
+    header.append(&chat_menu);
 
-    // Hide button
-    let hide_btn = build_hide_button(window);
-    header.append(&hide_btn);
+    let sync_section = move |stack: &adw::ViewStack| {
+        if let Some(child) = stack.visible_child() {
+            title.set_text(&stack.page(&child).title().unwrap_or_default());
+        }
+        chat_menu.set_visible(stack.visible_child_name().as_deref() == Some("chat"));
+    };
+    sync_section(stack);
+    stack.connect_visible_child_name_notify(sync_section);
+
+    let collapse = gtk4::Button::from_icon_name("view-restore-symbolic");
+    collapse.add_css_class("flat");
+    collapse.set_tooltip_text(Some("Collapse to Shaya orb"));
+    collapse.set_action_name(Some("orbit.collapse"));
+    header.append(&collapse);
+    header.append(&build_hide_button(window));
 
     // Setup drag gesture for window movement
     setup_drag_gesture(&header, window, state);
@@ -57,97 +62,62 @@ pub fn build(
     header
 }
 
-/// Build navigation buttons
-fn build_navigation(stack: &adw::ViewStack) -> GtkBox {
-    let nav = GtkBox::new(Orientation::Horizontal, 2);
-    nav.add_css_class("linked");
+/// Stack pages in order: the one list of sections the menu and the orbit show.
+pub fn sections(stack: &adw::ViewStack) -> Vec<adw::ViewStackPage> {
+    stack
+        .pages()
+        .iter::<adw::ViewStackPage>()
+        .filter_map(Result::ok)
+        .collect()
+}
 
-    let chat_btn = ToggleButton::new();
-    chat_btn.set_icon_name("go-home-symbolic");
-    chat_btn.set_tooltip_text(Some("Chat"));
-    chat_btn.set_active(true);
+/// Section menu. The action follows the stack, so every way of switching stays in sync.
+fn build_navigation(window: &ApplicationWindow, stack: &adw::ViewStack) -> MenuButton {
+    let actions = gio::SimpleActionGroup::new();
+    actions.add_action(&gio::PropertyAction::new(
+        "section",
+        stack,
+        "visible-child-name",
+    ));
+    window.insert_action_group("nav", Some(&actions));
 
-    let cheatsheets_btn = ToggleButton::new();
-    cheatsheets_btn.set_icon_name("accessories-text-editor-symbolic");
-    cheatsheets_btn.set_tooltip_text(Some("Cheatsheets"));
-    cheatsheets_btn.set_group(Some(&chat_btn));
+    let menu = gio::Menu::new();
+    let settings = gio::Menu::new();
+    for page in sections(stack) {
+        let name = page.name().unwrap_or_default();
+        let target = if name == "settings" { &settings } else { &menu };
+        target.append(
+            page.title().as_deref(),
+            Some(&format!("nav.section::{name}")),
+        );
+    }
+    menu.append_section(None, &settings);
 
-    let prompts_btn = ToggleButton::new();
-    prompts_btn.set_icon_name("document-edit-symbolic");
-    prompts_btn.set_tooltip_text(Some("Prompts"));
-    prompts_btn.set_group(Some(&chat_btn));
+    MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .tooltip_text("Sections")
+        .menu_model(&menu)
+        .has_frame(false)
+        .build()
+}
 
-    let history_btn = ToggleButton::new();
-    history_btn.set_icon_name("document-open-recent-symbolic");
-    history_btn.set_tooltip_text(Some("History"));
-    history_btn.set_group(Some(&chat_btn));
+/// Actions on the open chat. Handled by the chat view.
+fn build_chat_menu() -> MenuButton {
+    let menu = gio::Menu::new();
+    menu.append(Some("Save to History"), Some("chat.save"));
+    menu.append(Some("Clear Chat"), Some("chat.clear"));
 
-    let settings_btn = ToggleButton::new();
-    settings_btn.set_icon_name("emblem-system-symbolic");
-    settings_btn.set_tooltip_text(Some("Settings"));
-    settings_btn.set_group(Some(&chat_btn));
-
-    let meetings_btn = ToggleButton::new();
-    meetings_btn.set_icon_name("media-record-symbolic");
-    meetings_btn.set_tooltip_text(Some("Meetings"));
-    meetings_btn.set_group(Some(&chat_btn));
-
-    // Connect to stack
-    let stack_c = stack.clone();
-    chat_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("chat");
-        }
-    });
-
-    let stack_c = stack.clone();
-    cheatsheets_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("cheatsheets");
-        }
-    });
-
-    let stack_c = stack.clone();
-    prompts_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("prompts");
-        }
-    });
-
-    let stack_c = stack.clone();
-    history_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("history");
-        }
-    });
-
-    let stack_c = stack.clone();
-    settings_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("settings");
-        }
-    });
-
-    let stack_c = stack.clone();
-    meetings_btn.connect_toggled(move |btn| {
-        if btn.is_active() {
-            stack_c.set_visible_child_name("meetings");
-        }
-    });
-
-    nav.append(&chat_btn);
-    nav.append(&cheatsheets_btn);
-    nav.append(&prompts_btn);
-    nav.append(&history_btn);
-    nav.append(&settings_btn);
-    nav.append(&meetings_btn);
-
-    nav
+    MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .tooltip_text("Chat actions")
+        .menu_model(&menu)
+        .has_frame(false)
+        .build()
 }
 
 /// Build hide button
 fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
-    let hide_btn = gtk4::Button::with_label("—");
+    let hide_btn = gtk4::Button::from_icon_name("window-minimize-symbolic");
     hide_btn.set_tooltip_text(Some("Hide"));
     hide_btn.add_css_class("flat");
 
@@ -160,8 +130,8 @@ fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
 }
 
 /// Setup drag gesture for window movement (layer-shell)
-pub fn setup_drag_gesture(
-    widget: &GtkBox,
+pub(super) fn setup_drag_gesture(
+    widget: &impl IsA<gtk4::Widget>,
     window: &ApplicationWindow,
     state: Rc<RefCell<AppState>>,
 ) {

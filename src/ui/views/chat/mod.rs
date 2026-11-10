@@ -14,7 +14,10 @@ mod audio;
 mod live;
 pub mod markdown;
 mod messaging;
+mod status;
+mod transcript;
 mod view;
 
+pub(crate) use transcript::Transcript;
 pub(crate) use view::ChatSharedState;
-pub use view::{build_content, build_input, refresh_display};
+pub use view::{build_content, build_input};
