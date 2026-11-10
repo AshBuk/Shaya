@@ -14,5 +14,7 @@
 
 mod header;
 mod layer_shell;
+mod orbit;
 pub mod stealth;
+pub mod theme;
 pub mod views;

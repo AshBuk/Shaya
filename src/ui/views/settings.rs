@@ -13,7 +13,7 @@ use crate::core::state::{
     AiProvider, AppState, SttProvider, LIVE_CHUNK_MAX_SECS, LIVE_CHUNK_MIN_SECS,
 };
 use adw::prelude::*;
-use gtk4::{glib, ApplicationWindow, Box as GtkBox, PolicyType, ScrolledWindow, StringList};
+use gtk4::{glib, Box as GtkBox, PolicyType, ScrolledWindow, StringList};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -147,7 +147,7 @@ fn stt_choices(provider: SttProvider) -> Vec<(&'static str, String)> {
 }
 
 /// Build the settings view
-pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
+pub fn build(state: Rc<RefCell<AppState>>) -> GtkBox {
     let vbox = GtkBox::new(gtk4::Orientation::Vertical, 0);
     let page = adw::PreferencesPage::new();
 
@@ -456,16 +456,16 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
                 adw::ColorScheme::ForceLight
             });
         }
-        crate::ui::stealth::apply_dark_override(is_dark);
+        crate::ui::theme::apply(is_dark, state_c.borrow().settings.window_opacity);
         schedule_autosave(&debounce, &state_c);
     });
 
     appearance_group.add(&dark_mode_row);
 
-    // Window Opacity
+    // Background opacity
     let opacity_row = adw::ActionRow::new();
-    opacity_row.set_title("Window Opacity");
-    opacity_row.set_subtitle("Transparency level (100% = opaque)");
+    opacity_row.set_title("Background Opacity");
+    opacity_row.set_subtitle("Text stays fully opaque");
 
     let opacity_scale = gtk4::Scale::with_range(gtk4::Orientation::Horizontal, 0.3, 1.0, 0.05);
     opacity_scale.set_value(state.borrow().settings.window_opacity);
@@ -475,13 +475,12 @@ pub fn build(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox
     opacity_scale.set_width_request(200);
     opacity_scale.set_format_value_func(|_, value| format!("{:.0}%", value * 100.0));
 
-    let window_clone = window.clone();
     let state_c = state.clone();
     let debounce = save_debounce.clone();
     opacity_scale.connect_value_changed(move |scale| {
         let opacity = scale.value();
         state_c.borrow_mut().settings.window_opacity = opacity;
-        window_clone.set_opacity(opacity);
+        crate::ui::theme::apply(state_c.borrow().settings.dark_mode, opacity);
         schedule_autosave(&debounce, &state_c);
     });
 

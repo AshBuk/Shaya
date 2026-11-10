@@ -1,0 +1,274 @@
+/* Palette (@shaya_*) comes from theme.rs. Keep to CSS that GTK 4.14 can parse. */
+
+window.shaya {
+  background: none;
+  color: @shaya_fg;
+  box-shadow: none;
+}
+
+.shaya-surface {
+  background-color: @shaya_window;
+}
+
+.shaya-surface.floating {
+  border: 1px solid @shaya_border;
+  border-radius: 16px;
+}
+
+/* Header */
+
+.shaya-header {
+  min-height: 38px;
+  padding: 6px 8px;
+  border-bottom: 1px solid @shaya_border;
+}
+
+.shaya-title {
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* Conversation */
+
+.message-list {
+  padding: 18px 18px 12px;
+}
+
+.user-bubble {
+  background-color: @shaya_bubble;
+  border-radius: 12px 12px 3px 12px;
+  padding: 10px 12px;
+}
+
+.bubble-image {
+  border-radius: 8px;
+}
+
+.message-text,
+.message-text > text {
+  background: none;
+}
+
+.code-card {
+  background-color: @shaya_code;
+  border: 1px solid @shaya_border;
+  border-radius: 8px;
+}
+
+.code-card-header {
+  border-bottom: 1px solid @shaya_border;
+  padding: 2px 4px 2px 12px;
+}
+
+.code-lang {
+  font-size: 0.85em;
+  color: @shaya_muted;
+}
+
+.code-text {
+  font-family: monospace;
+  font-size: 0.93em;
+  padding: 10px 12px;
+}
+
+.message-actions {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.assistant-message:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+}
+
+.small-action {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+/* Empty state */
+
+.empty-title {
+  font-size: 1.5em;
+  font-weight: 700;
+}
+
+.empty-description {
+  color: @shaya_muted;
+}
+
+/* Status and active capture */
+
+.chat-status {
+  font-size: 0.92em;
+  padding: 0 6px;
+}
+
+.chat-status.neutral label {
+  opacity: 0.75;
+}
+
+.chat-status.error label {
+  color: @shaya_error;
+}
+
+.activity-bar {
+  background-color: @shaya_card;
+  border: 1px solid @shaya_border;
+  border-radius: 8px;
+  padding: 3px 4px 3px 12px;
+}
+
+.activity-dot {
+  background-color: @shaya_error;
+  border-radius: 50%;
+  min-height: 8px;
+  min-width: 8px;
+  animation: activity-pulse 1400ms ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Composer */
+
+.composer {
+  background-color: @shaya_card;
+  border: 1px solid @shaya_border;
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 2px 8px alpha(black, 0.04);
+  transition: border-color 120ms ease-out;
+}
+
+.composer:focus-within {
+  border-color: alpha(@shaya_accent, 0.55);
+}
+
+.composer-input,
+.composer-input > text {
+  background: none;
+}
+
+.composer-placeholder {
+  color: @shaya_muted;
+}
+
+.composer-tool {
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0 6px;
+}
+
+.composer-tool.recording {
+  background-color: alpha(@shaya_error, 0.18);
+  color: @shaya_error;
+}
+
+.model-chip {
+  font-size: 0.86em;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.model-chip label {
+  color: @shaya_muted;
+}
+
+.composer-send {
+  min-height: 32px;
+  min-width: 32px;
+}
+
+.attachment-chip {
+  background-color: @shaya_bubble;
+  border-radius: 8px;
+  padding: 4px 4px 4px 4px;
+}
+
+.attachment-thumb {
+  border-radius: 6px;
+}
+
+.attachment-label {
+  font-size: 0.86em;
+}
+
+/* Layer-shell windows have no compositor resize edge */
+
+.resize-grip {
+  background-image: linear-gradient(
+    135deg,
+    transparent 58%,
+    alpha(currentColor, 0.3) 58%,
+    alpha(currentColor, 0.3) 66%,
+    transparent 66%,
+    transparent 76%,
+    alpha(currentColor, 0.3) 76%,
+    alpha(currentColor, 0.3) 84%,
+    transparent 84%
+  );
+  border-bottom-right-radius: 16px;
+  min-height: 16px;
+  min-width: 16px;
+}
+
+/* Explicit foregrounds keep custom surfaces readable in either system theme. */
+window.shaya popover > contents {
+  background-color: @popover_bg_color;
+  color: @shaya_fg;
+  border: 1px solid @shaya_border;
+}
+
+.message-text, .message-text > text,
+.composer-input, .composer-input > text,
+.user-bubble, .code-card, .attachment-chip {
+  color: @shaya_fg;
+}
+
+window.shaya .suggested-action {
+  background-color: @accent_bg_color;
+  color: white;
+}
+
+.shaya-wordmark {
+  color: @shaya_accent;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.shaya-title {
+  color: @shaya_muted;
+  font-size: 0.92em;
+}
+
+.assistant-message {
+  padding: 2px 0;
+}
+
+.orbit-center {
+  padding: 0;
+  border-radius: 50%;
+  background: @shaya_card;
+  color: @shaya_fg;
+  border: 2px solid alpha(@shaya_accent, 0.65);
+  box-shadow: 0 0 6px alpha(@shaya_accent, 0.18);
+}
+
+.orbit-node {
+  padding: 0;
+  border-radius: 50%;
+  background: @shaya_card;
+  color: @shaya_fg;
+  border: 1px solid alpha(@shaya_accent, 0.3);
+  font-size: 0.8em;
+  transition: background-color 160ms ease-out;
+}
+
+.orbit-node:hover, .orbit-center:hover {
+  background: alpha(@shaya_accent, 0.18);
+}
