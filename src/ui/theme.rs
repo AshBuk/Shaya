@@ -86,6 +86,7 @@ fn palette(is_dark: bool, opacity: f64) -> String {
          @define-color accent_fg_color white;
          @define-color shaya_window rgba({window}, {opacity:.2});
          @define-color shaya_card rgba({card}, {opacity:.2});
+         @define-color shaya_card_solid rgb({card});
          @define-color shaya_bubble rgb({bubble});
          @define-color shaya_code rgb({code});
          @define-color shaya_border rgba({line}, 0.09);
