@@ -334,7 +334,14 @@ fn build_meeting_actions(
     // Status-dependent transcription pipeline buttons
     actions.append(&build_transcription_controls(meeting, state, container));
 
-    // Delete button
+    // Recording, conversion and transcription still write to the meeting directory.
+    if matches!(
+        meeting.status,
+        MeetingStatus::Recording | MeetingStatus::Converting | MeetingStatus::Transcribing
+    ) {
+        return actions;
+    }
+
     let delete_btn = Button::from_icon_name("user-trash-symbolic");
     delete_btn.set_tooltip_text(Some("Delete meeting"));
     delete_btn.add_css_class("flat");
