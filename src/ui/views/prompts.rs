@@ -62,7 +62,9 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
                 "You are a helpful AI assistant.".to_string(),
             );
             state_c.borrow_mut().active_prompt_ids.push(id);
-            let _ = state_c.borrow().save();
+            if let Err(e) = state_c.borrow().save() {
+                tracing::error!("Failed to save state: {}", e);
+            }
             rebuild_content(&container_c, &state_c);
         });
         empty_box.append(&add_btn);
@@ -119,7 +121,9 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
 
         check_btn.connect_toggled(move |_| {
             state_c.borrow_mut().toggle_prompt(&prompt_id);
-            let _ = state_c.borrow().save();
+            if let Err(e) = state_c.borrow().save() {
+                tracing::error!("Failed to save state: {}", e);
+            }
             rebuild_content(&container_c, &state_c);
         });
 
@@ -178,7 +182,9 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
             dialog.connect_response(None, move |d, response| {
                 if response == "delete" {
                     state_cc.borrow_mut().remove_prompt(&id);
-                    let _ = state_cc.borrow().save();
+                    if let Err(e) = state_cc.borrow().save() {
+                        tracing::error!("Failed to save state: {}", e);
+                    }
                     rebuild_content(&container_cc, &state_cc);
                 }
                 d.close();
@@ -210,7 +216,9 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
         );
         // Auto-activate new prompt
         state_c.borrow_mut().active_prompt_ids.push(id);
-        let _ = state_c.borrow().save();
+        if let Err(e) = state_c.borrow().save() {
+            tracing::error!("Failed to save state: {}", e);
+        }
         rebuild_content(&container_c, &state_c);
     });
 
@@ -286,7 +294,10 @@ fn show_edit_dialog(
         .build();
     vbox.append(&scroll);
 
-    toolbar.set_content(Some(&vbox));
+    // Keeps the dialog open with the error when the edit cannot be written.
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&vbox));
+    toolbar.set_content(Some(&toasts));
     dialog.set_child(Some(&toolbar));
 
     // Save handler
@@ -301,17 +312,25 @@ fn show_edit_dialog(
         let (start, end) = buffer.bounds();
         let new_content = buffer.text(&start, &end, false).to_string();
 
-        {
+        let saved = {
             let mut state_mut = state_c.borrow_mut();
             if let Some(prompt) = state_mut.prompts.iter_mut().find(|p| p.id == id) {
                 prompt.name = new_name;
                 prompt.content = new_content;
             }
-            let _ = state_mut.save();
-        }
+            state_mut.save()
+        };
 
-        dialog_c.close();
-        rebuild_content(&container_c, &state_c);
+        match saved {
+            Ok(()) => {
+                dialog_c.close();
+                rebuild_content(&container_c, &state_c);
+            }
+            Err(e) => {
+                tracing::error!("Failed to save {}: {}", id, e);
+                toasts.add_toast(adw::Toast::new(&format!("Not saved: {e}")));
+            }
+        }
     });
 
     if let Some(window) = btn.root().and_then(|r| r.downcast::<gtk4::Window>().ok()) {

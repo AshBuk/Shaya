@@ -79,7 +79,9 @@ fn build_controls(
     let state_c = state.clone();
     mic_toggle.connect_active_notify(move |row| {
         state_c.borrow_mut().settings.meeting_record_mic = row.is_active();
-        let _ = state_c.borrow().save();
+        if let Err(e) = state_c.borrow().save() {
+            tracing::error!("Failed to save state: {}", e);
+        }
     });
 
     // AdwSwitchRow can only be placed into a GtkListBox
