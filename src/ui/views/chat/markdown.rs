@@ -398,9 +398,7 @@ impl<'a> Parser<'a> {
         while i < len {
             // Inline code: `...`
             if chars[i] == '`' {
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((code_text, end)) = self.extract_delimited(&chars, i + 1, '`') {
                     self.insert_with_tag(&code_text, "code");
@@ -411,9 +409,7 @@ impl<'a> Parser<'a> {
             }
             // Strikethrough: ~~...~~
             else if i + 1 < len && chars[i] == '~' && chars[i + 1] == '~' {
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((st_text, end)) =
                     self.extract_double_delimited(&chars, i + 2, '~', false)
@@ -427,9 +423,7 @@ impl<'a> Parser<'a> {
             // Link: [text](url) — render text with link style
             else if chars[i] == '[' {
                 if let Some((link_text, end)) = self.parse_link(&chars, i) {
-                    if i > plain_start {
-                        self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                    }
+                    self.flush_plain(&chars, &mut plain_start, i);
                     self.insert_with_tag(&link_text, "link");
                     i = end;
                     plain_start = i;
@@ -438,9 +432,7 @@ impl<'a> Parser<'a> {
             }
             // Bold: **...**
             else if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((bold_text, end)) =
                     self.extract_double_delimited(&chars, i + 2, '*', false)
@@ -459,9 +451,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
 
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((italic_text, end)) =
                     self.extract_single_delimited(&chars, i + 1, '*', false)
@@ -478,9 +468,7 @@ impl<'a> Parser<'a> {
                 && chars[i + 1] == '_'
                 && (i == 0 || !chars[i - 1].is_alphanumeric())
             {
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((bold_text, end)) =
                     self.extract_double_delimited(&chars, i + 2, '_', true)
@@ -501,9 +489,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
 
-                if i > plain_start {
-                    self.insert_plain(&chars[plain_start..i].iter().collect::<String>());
-                }
+                self.flush_plain(&chars, &mut plain_start, i);
 
                 if let Some((italic_text, end)) =
                     self.extract_single_delimited(&chars, i + 1, '_', true)
@@ -522,6 +508,15 @@ impl<'a> Parser<'a> {
         if plain_start < len {
             self.insert_plain(&chars[plain_start..].iter().collect::<String>());
         }
+    }
+
+    /// Flush plain text before a delimiter. Moving `plain_start` keeps an unclosed
+    /// delimiter and the text after it in the next run, so nothing is written twice.
+    fn flush_plain(&self, chars: &[char], plain_start: &mut usize, i: usize) {
+        if i > *plain_start {
+            self.insert_plain(&chars[*plain_start..i].iter().collect::<String>());
+        }
+        *plain_start = i;
     }
 
     /// Parse [text](url) link, returns (display_text, end_index)
