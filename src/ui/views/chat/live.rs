@@ -12,8 +12,8 @@ use super::transcript::Transcript;
 use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::live::{
-    is_no_suggestion, live_transcript_message, LiveRequestRange, LiveSession, LIVE_SYSTEM_PROMPT,
-    MAX_PENDING_CHUNKS,
+    is_no_suggestion, live_transcript_message, ChunkQueue, LiveRequestRange, LiveSession,
+    LIVE_SYSTEM_PROMPT, MAX_PENDING_CHUNKS,
 };
 use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
 use crate::core::utils;
@@ -49,6 +49,9 @@ pub(super) struct LiveRuntime {
     session: Option<LiveSession>,
     recorder: Option<ListenRecorder>,
     active_chunk: Option<ActiveChunk>,
+    results: ChunkQueue<ProcessedChunk>,
+    /// Answer now waits for its chunk; a second press must not start another.
+    force_pending: bool,
     next_seq: u64,
     run_id: u64,
 }
@@ -63,6 +66,14 @@ struct ActiveChunk {
 enum ChunkResult {
     Silent,
     Speech(String),
+    /// Capture or STT failed; the error is already shown.
+    Skipped,
+}
+
+struct ProcessedChunk {
+    chunk: ActiveChunk,
+    result: ChunkResult,
+    force_reply: bool,
 }
 
 impl LiveRuntime {
@@ -107,6 +118,8 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     {
         let mut live = runtime.borrow_mut();
         live.session = Some(session);
+        live.results = ChunkQueue::new(1);
+        live.force_pending = false;
         live.next_seq = 1;
         live.run_id = Utc::now().timestamp_micros() as u64;
     }
@@ -197,37 +210,34 @@ fn finish_chunk(
             return;
         }
         live.active_chunk = None;
-        let Some(mut recorder) = live.recorder.take() else {
-            return;
-        };
-        match recorder.stop() {
-            Ok(path) => path,
-            Err(e) => {
-                let active = live.session.is_some() && live.run_id == run_id;
-                drop(live);
-                if active {
-                    ctx.status.error(&format!("Live chunk skipped: {}", e));
-                    start_next_chunk(ctx, runtime);
-                }
-                return;
-            }
-        }
+        stop_recorder(live.recorder.take())
+    };
+    let chunk = ActiveChunk {
+        seq,
+        started_at,
+        run_id,
     };
 
-    if is_active_run(&runtime, run_id) {
-        start_next_chunk(ctx.clone(), runtime.clone());
+    if !is_active_run(&runtime, run_id) {
+        if let Ok(path) = audio_path {
+            let _ = fs::remove_file(path);
+        }
+        return;
     }
-    process_chunk(
-        ctx,
-        runtime,
-        ActiveChunk {
-            seq,
-            started_at,
-            run_id,
-        },
-        audio_path,
-        false,
-    );
+    start_next_chunk(ctx.clone(), runtime.clone());
+    match audio_path {
+        Ok(path) => process_chunk(ctx, runtime, chunk, path, false),
+        Err(e) => {
+            ctx.status.error(&format!("Live chunk skipped: {}", e));
+            complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, false);
+        }
+    }
+}
+
+fn stop_recorder(recorder: Option<ListenRecorder>) -> Result<PathBuf, String> {
+    recorder
+        .ok_or_else(|| "no recorder".to_string())
+        .and_then(|mut recorder| recorder.stop())
 }
 
 fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
@@ -235,6 +245,10 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         let mut live = runtime.borrow_mut();
         if live.session.is_none() {
             ctx.status.error("Live is not active");
+            return;
+        }
+        if live.force_pending {
+            ctx.status.activity("Live · transcribing");
             return;
         }
         if live
@@ -245,22 +259,23 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             ctx.status.activity("Live · thinking");
             return;
         }
+        live.force_pending = true;
         (live.recorder.take(), live.active_chunk.take())
     };
-    let (Some(mut recorder), Some(chunk)) = (recorder, chunk) else {
-        finish_force_reply(ctx, runtime, None);
+    let Some(chunk) = chunk else {
+        finish_force_reply(ctx.clone(), runtime.clone(), None);
+        start_next_chunk(ctx, runtime);
         return;
     };
 
-    let stopped = recorder.stop();
-
+    // Keep listening while the flushed chunk is transcribed.
+    let stopped = stop_recorder(recorder);
+    start_next_chunk(ctx.clone(), runtime.clone());
     match stopped {
-        Ok(audio_path) => {
-            process_chunk(ctx, runtime, chunk, audio_path, true);
-        }
+        Ok(audio_path) => process_chunk(ctx, runtime, chunk, audio_path, true),
         Err(e) => {
             ctx.status.error(&format!("Live flush skipped: {}", e));
-            finish_force_reply(ctx, runtime, Some(chunk.seq));
+            complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, true);
         }
     }
 }
@@ -272,11 +287,7 @@ fn process_chunk(
     audio_path: PathBuf,
     force_reply_after: bool,
 ) {
-    let ActiveChunk {
-        seq,
-        started_at,
-        run_id,
-    } = chunk;
+    let run_id = chunk.run_id;
 
     let (stt_provider, stt_key, stt_model) = {
         let state = ctx.state.borrow();
@@ -313,34 +324,60 @@ fn process_chunk(
             return;
         }
 
-        match result {
-            Ok(Ok(ChunkResult::Silent)) => {
-                if force_reply_after {
-                    finish_force_reply(ctx, runtime, Some(seq));
-                } else {
-                    handle_silent_chunk(ctx, runtime, seq);
-                }
-            }
-            Ok(Ok(ChunkResult::Speech(text))) => {
-                handle_speech_chunk(ctx.clone(), runtime.clone(), seq, started_at, text);
-                if force_reply_after {
-                    finish_force_reply(ctx, runtime, Some(seq));
-                }
-            }
+        let result = match result {
+            Ok(Ok(result)) => result,
             Ok(Err(e)) => {
                 ctx.status.error(&format!("Live STT failed: {}", e));
-                if force_reply_after {
-                    finish_force_reply(ctx, runtime, Some(seq));
-                }
+                ChunkResult::Skipped
             }
             Err(e) => {
                 ctx.status.error(&format!("Live STT task failed: {:?}", e));
-                if force_reply_after {
-                    finish_force_reply(ctx, runtime, Some(seq));
-                }
+                ChunkResult::Skipped
             }
-        }
+        };
+        complete_chunk(ctx, runtime, chunk, result, force_reply_after);
     });
+}
+
+/// Queue a finished chunk and apply every chunk that is now in recording order.
+fn complete_chunk(
+    ctx: LiveContext,
+    runtime: Rc<RefCell<LiveRuntime>>,
+    chunk: ActiveChunk,
+    result: ChunkResult,
+    force_reply: bool,
+) {
+    let ready = runtime.borrow_mut().results.push(
+        chunk.seq,
+        ProcessedChunk {
+            chunk,
+            result,
+            force_reply,
+        },
+    );
+    for done in ready {
+        if !is_active_run(&runtime, chunk.run_id) {
+            return;
+        }
+        let seq = done.chunk.seq;
+        match done.result {
+            ChunkResult::Speech(text) => handle_speech_chunk(
+                ctx.clone(),
+                runtime.clone(),
+                seq,
+                done.chunk.started_at,
+                text,
+            ),
+            // Answer now closes the utterance itself.
+            ChunkResult::Silent if !done.force_reply => {
+                handle_silent_chunk(ctx.clone(), runtime.clone(), seq)
+            }
+            ChunkResult::Silent | ChunkResult::Skipped => {}
+        }
+        if done.force_reply {
+            finish_force_reply(ctx.clone(), runtime.clone(), Some(seq));
+        }
+    }
 }
 
 fn handle_speech_chunk(
@@ -391,6 +428,7 @@ fn finish_force_reply(
     runtime: Rc<RefCell<LiveRuntime>>,
     closing_seq: Option<u64>,
 ) {
+    runtime.borrow_mut().force_pending = false;
     if !runtime.borrow().is_active() {
         return;
     }
@@ -404,9 +442,6 @@ fn finish_force_reply(
         request_answer(ctx.clone(), runtime.clone(), true);
     } else {
         ctx.status.activity("Live · no new transcript");
-    }
-    if runtime.borrow().is_active() {
-        start_next_chunk(ctx, runtime);
     }
 }
 

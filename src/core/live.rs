@@ -9,6 +9,7 @@
 use crate::core::state::{Message, Role};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const NO_SUGGESTION: &str = "NO_SUGGESTION";
 pub const MAX_PENDING_CHUNKS: u64 = 6;
@@ -197,6 +198,43 @@ impl LiveSession {
     }
 }
 
+/// Releases chunk results in recording order. STT requests finish in any order, and a
+/// chunk applied early would put its words before the ones spoken earlier.
+#[derive(Debug)]
+pub struct ChunkQueue<T> {
+    next_seq: u64,
+    ready: BTreeMap<u64, T>,
+}
+
+impl<T> ChunkQueue<T> {
+    pub fn new(first_seq: u64) -> Self {
+        Self {
+            next_seq: first_seq,
+            ready: BTreeMap::new(),
+        }
+    }
+
+    /// Store the result for `seq` and return every result that is now in order.
+    /// Each seq must be pushed once, a skipped chunk too, or the ones after it wait.
+    pub fn push(&mut self, seq: u64, item: T) -> Vec<T> {
+        if seq >= self.next_seq {
+            self.ready.insert(seq, item);
+        }
+        let mut released = Vec::new();
+        while let Some(item) = self.ready.remove(&self.next_seq) {
+            released.push(item);
+            self.next_seq += 1;
+        }
+        released
+    }
+}
+
+impl<T> Default for ChunkQueue<T> {
+    fn default() -> Self {
+        Self::new(1)
+    }
+}
+
 fn normalize_utterance(parts: &[String]) -> String {
     parts
         .iter()
@@ -227,6 +265,16 @@ pub fn is_no_suggestion(response: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunk_queue_releases_results_in_recording_order() {
+        let mut queue = ChunkQueue::new(1);
+
+        assert!(queue.push(2, "two").is_empty());
+        assert!(queue.push(3, "three").is_empty());
+        assert_eq!(queue.push(1, "one"), ["one", "two", "three"]);
+        assert_eq!(queue.push(4, "four"), ["four"]);
+    }
 
     fn session() -> LiveSession {
         LiveSession::new(4)
