@@ -9,7 +9,7 @@
 use super::{agent, request_error};
 use crate::core::state::SttProvider;
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,6 +41,15 @@ pub struct WhisperClient {
 #[derive(Deserialize)]
 struct TranscriptionResponse {
     text: String,
+    #[serde(default)]
+    segments: Vec<SpeechSegment>,
+}
+
+/// Speech with the second it starts at in the uploaded audio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeechSegment {
+    pub start: f64,
+    pub text: String,
 }
 
 impl WhisperClient {
@@ -55,6 +64,34 @@ impl WhisperClient {
 
     /// Transcribe audio file to text
     pub fn transcribe(&self, audio_path: &Path) -> Result<String> {
+        let text = self.request(audio_path, "json")?.text.trim().to_string();
+        // Length only: the text itself is private and logs end up in bug reports.
+        tracing::info!("Transcription received ({} chars)", text.chars().count());
+        Ok(text)
+    }
+
+    /// Whisper models return segment timestamps; gpt-4o transcription models do not.
+    pub fn has_timestamps(&self) -> bool {
+        self.model.starts_with("whisper")
+    }
+
+    /// Transcribe audio file into timed segments. Requires `has_timestamps`.
+    pub fn transcribe_segments(&self, audio_path: &Path) -> Result<Vec<SpeechSegment>> {
+        let response = self.request(audio_path, "verbose_json")?;
+        tracing::info!(
+            "Transcription received ({} segments)",
+            response.segments.len()
+        );
+        if response.segments.is_empty() && !response.text.trim().is_empty() {
+            return Ok(vec![SpeechSegment {
+                start: 0.0,
+                text: response.text,
+            }]);
+        }
+        Ok(response.segments)
+    }
+
+    fn request(&self, audio_path: &Path, response_format: &str) -> Result<TranscriptionResponse> {
         if !audio_path.exists() {
             anyhow::bail!("Audio file not found: {}", audio_path.display());
         }
@@ -101,7 +138,7 @@ impl WhisperClient {
         // Add response format field
         body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
         body.extend_from_slice(b"Content-Disposition: form-data; name=\"response_format\"\r\n\r\n");
-        body.extend_from_slice(b"json");
+        body.extend_from_slice(response_format.as_bytes());
         body.extend_from_slice(b"\r\n");
 
         // End boundary
@@ -122,11 +159,7 @@ impl WhisperClient {
             .send_bytes(&body)
             .map_err(|e| request_error("Transcription", e))?;
 
-        let transcription: TranscriptionResponse = response.into_json()?;
-        let text = transcription.text.trim().to_string();
-        // Length only: the text itself is private and logs end up in bug reports.
-        tracing::info!("Transcription received ({} chars)", text.chars().count());
-        Ok(text)
+        Ok(response.into_json()?)
     }
 }
 

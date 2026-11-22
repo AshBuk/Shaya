@@ -14,7 +14,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 /// Default chunk duration in seconds (10 minutes)
-const DEFAULT_CHUNK_SECS: u64 = 600;
+pub const DEFAULT_CHUNK_SECS: u64 = 600;
 
 /// Split a WAV file into time-based chunks.
 /// Returns paths to chunk files. If the file is short enough, returns the original path.

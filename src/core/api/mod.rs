@@ -13,7 +13,7 @@ pub mod whisper;
 mod live_providers;
 
 pub use llm::{ChatOptions, LlmClient};
-pub use whisper::WhisperClient;
+pub use whisper::{SpeechSegment, WhisperClient};
 
 use serde::Deserialize;
 use std::sync::LazyLock;
