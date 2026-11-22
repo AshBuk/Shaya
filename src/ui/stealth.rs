@@ -15,7 +15,7 @@ use super::{header, layer_shell, theme, views};
 use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::gio::ApplicationFlags;
+use gtk4::gio::{self, ApplicationFlags};
 use gtk4::{gdk, glib, ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, Overlay};
 use libadwaita as adw;
 use std::cell::Cell;
@@ -97,6 +97,7 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 
     // Initialize layer-shell (stealth mode)
     layer_shell::init(&window, &state.borrow().settings);
+    install_window_actions(app, &window);
 
     // Apply saved appearance settings
     apply_color_scheme(state.borrow().settings.dark_mode);
@@ -138,6 +139,26 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
 
     super::orbit::install(&window, &overlay, &stack, state);
     window.present();
+}
+
+/// Hide and quit, for the header and the menu.
+fn install_window_actions(app: &adw::Application, window: &ApplicationWindow) {
+    let hide = gio::SimpleAction::new("hide", None);
+    let window_c = window.clone();
+    hide.connect_activate(move |_, _| hide_window(&window_c));
+    window.add_action(&hide);
+
+    let quit = gio::SimpleAction::new("quit", None);
+    let app_c = app.clone();
+    quit.connect_activate(move |_, _| app_c.quit());
+    window.add_action(&quit);
+    app.set_accels_for_action("win.quit", &["<Control>q"]);
+
+    // A normal window (GNOME, X11) hides on close like the overlay; Quit ends the app.
+    window.connect_close_request(|window| {
+        hide_window(window);
+        glib::Propagation::Stop
+    });
 }
 
 /// Build ViewStack with all views. Its pages, in this order, are the sections
@@ -319,7 +340,7 @@ fn apply_color_scheme(is_dark: bool) {
 }
 
 /// Hide window (set_visible works on both layer-shell and GNOME)
-pub(crate) fn hide_window(window: &ApplicationWindow) {
+fn hide_window(window: &ApplicationWindow) {
     WINDOW_HIDDEN.with(|h| h.set(true));
     tracing::info!("Hiding window");
     window.set_visible(false);
@@ -351,9 +372,25 @@ fn show_window(window: &ApplicationWindow) {
 /// Toggle window visibility (called by SIGUSR1 on re-run)
 fn toggle_window(window: &ApplicationWindow) {
     let hidden = WINDOW_HIDDEN.with(|h| h.get());
-    if hidden {
+    // The overlay stays above everything. A normal window can sit behind others,
+    // so the first press brings it up and the next one hides it.
+    let behind = !is_layer_window(window) && !window.is_active();
+    if hidden || behind {
         show_window(window);
     } else {
         hide_window(window);
+    }
+}
+
+fn is_layer_window(window: &ApplicationWindow) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk4_layer_shell::LayerShell;
+        window.is_layer_window()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = window;
+        false
     }
 }

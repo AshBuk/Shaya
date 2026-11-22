@@ -25,7 +25,7 @@ One Rust binary, pure GTK4.
 | **Cheatsheets** | Quick-access markdown notes with live preview |
 | **Conversation History** | Browse, continue, or delete past sessions |
 | **Appearance** | Adjustable opacity, light/dark theme |
-| **Quick Toggle** | Bind any shortcut via DE settings or compositor config; re-run binary to show/hide |
+| **Quick Toggle** | Running `shaya` again shows or hides the window, see [OVERLAY_GUIDE](docs/OVERLAY_GUIDE.md#toggle-shortcut) |
 | **Privacy** | BYOK (bring your own key): no account and no Shaya servers. Requests go directly to the provider you choose, everything else stays on your machine |
 | **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any provider |
 | **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor |

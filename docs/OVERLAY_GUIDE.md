@@ -2,6 +2,19 @@
 
 Shaya runs as an overlay above your other windows. Whether people see it when you share your screen depends on the compositor. This guide covers how the overlay behaves and how to keep your chat and notes off a shared screen.
 
+## Toggle shortcut
+
+Shaya has no global shortcut of its own. Running `shaya` again shows or hides the window, so bind a key to it:
+
+```
+-- Hyprland, hyprland.lua
+hl.bind("SUPER + A", hl.dsp.exec_cmd("shaya"))
+# Sway
+bindsym $mod+a exec shaya
+```
+
+On KDE and GNOME, add a custom shortcut with the command `shaya` in the keyboard settings. Ctrl+Q quits.
+
 ## What the overlay does
 
 | Area | Behavior |

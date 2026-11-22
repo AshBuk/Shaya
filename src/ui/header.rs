@@ -54,7 +54,7 @@ pub fn build(
     collapse.set_tooltip_text(Some("Collapse to Shaya orb"));
     collapse.set_action_name(Some("orbit.collapse"));
     header.append(&collapse);
-    header.append(&build_hide_button(window));
+    header.append(&build_hide_button());
 
     // Setup drag gesture for window movement
     setup_drag_gesture(&header, window, state);
@@ -92,6 +92,9 @@ fn build_navigation(window: &ApplicationWindow, stack: &adw::ViewStack) -> MenuB
         );
     }
     menu.append_section(None, &settings);
+    let app_section = gio::Menu::new();
+    app_section.append(Some("Quit"), Some("win.quit"));
+    menu.append_section(None, &app_section);
 
     MenuButton::builder()
         .icon_name("open-menu-symbolic")
@@ -115,17 +118,12 @@ fn build_chat_menu() -> MenuButton {
         .build()
 }
 
-/// Build hide button
-fn build_hide_button(window: &ApplicationWindow) -> gtk4::Button {
+/// Hide button. Running `shaya` again brings the window back.
+fn build_hide_button() -> gtk4::Button {
     let hide_btn = gtk4::Button::from_icon_name("window-minimize-symbolic");
     hide_btn.set_tooltip_text(Some("Hide"));
     hide_btn.add_css_class("flat");
-
-    let window_c = window.clone();
-    hide_btn.connect_clicked(move |_| {
-        super::stealth::hide_window(&window_c);
-    });
-
+    hide_btn.set_action_name(Some("win.hide"));
     hide_btn
 }
 
