@@ -338,10 +338,8 @@ fn show_window(window: &ApplicationWindow) {
         if window.is_layer_window() {
             MAIN_STATE.with(|s| {
                 if let Some(state) = s.borrow().as_ref() {
-                    use gtk4_layer_shell::Edge;
                     let st = state.borrow();
-                    window.set_margin(Edge::Left, st.settings.window_x);
-                    window.set_margin(Edge::Top, st.settings.window_y);
+                    layer_shell::place(window, st.settings.window_x, st.settings.window_y);
                 }
             });
         }
