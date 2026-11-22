@@ -9,7 +9,7 @@
 //! Each meeting is stored in its own directory under
 //! `~/.local/share/shaya/meetings/meeting-{timestamp}/`
 
-use crate::core::api::WhisperClient;
+use crate::core::api::{SpeechSegment, WhisperClient};
 use crate::core::audio::chunking;
 use crate::core::utils;
 use anyhow::Result;
@@ -277,22 +277,42 @@ pub fn transcribe_meeting(
 
     let parts_dir = chunks_dir(meeting_id);
     utils::ensure_private_dir(&parts_dir)?;
-    let mut parts: Vec<(PathBuf, &str)> = Vec::new();
+    let mut parts = Vec::new();
     for path in &audio_files {
         let label = source_label(path);
         if path.extension().is_some_and(|ext| ext == "wav") {
-            for chunk in chunking::chunk_wav(path, &parts_dir)? {
-                parts.push((chunk, label));
+            for (index, chunk) in chunking::chunk_wav(path, &parts_dir)?
+                .into_iter()
+                .enumerate()
+            {
+                parts.push(Part {
+                    path: chunk,
+                    label,
+                    offset_secs: (index as u64 * chunking::DEFAULT_CHUNK_SECS) as f64,
+                });
             }
         } else {
-            parts.push((path.clone(), label));
+            parts.push(Part {
+                path: path.clone(),
+                label,
+                offset_secs: 0.0,
+            });
         }
     }
 
     tracing::info!("Transcribing {} parts for {}", parts.len(), meeting_id);
     let client = WhisperClient::new(stt_provider, stt_api_key, stt_model);
-    let transcript = transcribe_parts(&parts, &parts_dir, audio_files.len() > 1, |path| {
-        client.transcribe(path)
+    let multi_source = audio_files.len() > 1;
+    // Timestamps interleave the sources; without them a part is ordered by its start.
+    let timed = multi_source && client.has_timestamps();
+    let transcript = transcribe_parts(&parts, &parts_dir, multi_source, |path| {
+        if timed {
+            client.transcribe_segments(path)
+        } else {
+            client
+                .transcribe(path)
+                .map(|text| vec![SpeechSegment { start: 0.0, text }])
+        }
     })?;
 
     MeetingManager::save_transcript(meeting_id, &transcript)?;
@@ -312,34 +332,58 @@ pub fn transcribe_meeting(
     Ok(transcript)
 }
 
+/// One uploaded piece of a source recording.
+struct Part {
+    path: PathBuf,
+    label: &'static str,
+    /// Where the part starts in its source recording.
+    offset_secs: f64,
+}
+
+/// Speech placed on the meeting timeline.
+struct Spoken<'a> {
+    at: f64,
+    part: usize,
+    label: &'a str,
+    text: String,
+}
+
 /// Transcribe every part, caching each result next to the parts.
 fn transcribe_parts(
-    parts: &[(PathBuf, &str)],
+    parts: &[Part],
     cache_dir: &Path,
     multi_source: bool,
-    mut transcribe: impl FnMut(&Path) -> Result<String>,
+    mut transcribe: impl FnMut(&Path) -> Result<Vec<SpeechSegment>>,
 ) -> Result<String> {
-    let mut transcript = String::new();
+    let mut spoken = Vec::new();
     let mut failures = Vec::new();
 
-    for (path, label) in parts {
-        let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-        let cache = cache_dir.join(format!("{stem}.txt"));
-        let text = match fs::read_to_string(&cache) {
-            Ok(text) => text,
-            Err(_) => match transcribe(path) {
-                Ok(text) => {
-                    utils::write_private(&cache, text.as_bytes())?;
-                    text
+    for (index, part) in parts.iter().enumerate() {
+        let stem = part.path.file_stem().unwrap_or_default().to_string_lossy();
+        let cache = cache_dir.join(format!("{stem}.json"));
+        let cached = fs::read(&cache)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Vec<SpeechSegment>>(&bytes).ok());
+        let segments = match cached {
+            Some(segments) => segments,
+            None => match transcribe(&part.path) {
+                Ok(segments) => {
+                    utils::write_private(&cache, &serde_json::to_vec(&segments)?)?;
+                    segments
                 }
                 Err(e) => {
-                    tracing::warn!("Transcription error for {}: {}", path.display(), e);
+                    tracing::warn!("Transcription error for {}: {}", part.path.display(), e);
                     failures.push(e.to_string());
                     continue;
                 }
             },
         };
-        append_part(&mut transcript, &text, label, multi_source);
+        spoken.extend(segments.into_iter().map(|segment| Spoken {
+            at: part.offset_secs + segment.start,
+            part: index,
+            label: part.label,
+            text: segment.text,
+        }));
     }
 
     if let Some(first) = failures.first() {
@@ -350,7 +394,36 @@ fn transcribe_parts(
             first
         );
     }
-    Ok(transcript)
+    Ok(format_transcript(spoken, multi_source))
+}
+
+/// Order speech by time. A new line, labelled when there are several sources,
+/// starts wherever the speech moves to another part.
+fn format_transcript(mut spoken: Vec<Spoken>, multi_source: bool) -> String {
+    // Stable: segments at the same second keep their part order.
+    spoken.sort_by(|a, b| a.at.total_cmp(&b.at));
+    let mut transcript = String::new();
+    let mut current_part = None;
+    for s in &spoken {
+        let text = s.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if current_part == Some(s.part) {
+            transcript.push(' ');
+        } else {
+            if !transcript.is_empty() {
+                transcript.push('\n');
+            }
+            if multi_source {
+                transcript.push_str(s.label);
+                transcript.push(' ');
+            }
+            current_part = Some(s.part);
+        }
+        transcript.push_str(text);
+    }
+    transcript
 }
 
 /// Determine source label from audio file name
@@ -361,20 +434,6 @@ fn source_label(path: &Path) -> &'static str {
     } else {
         "[System]"
     }
-}
-
-fn append_part(transcript: &mut String, text: &str, label: &str, multi_source: bool) {
-    if text.is_empty() {
-        return;
-    }
-    if !transcript.is_empty() {
-        transcript.push('\n');
-    }
-    if multi_source {
-        transcript.push_str(label);
-        transcript.push(' ');
-    }
-    transcript.push_str(text);
 }
 
 /// Transcription no longer needs the large WAVs that have a compressed copy.
@@ -453,6 +512,21 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
+    fn part(path: &Path, label: &'static str, offset_secs: f64) -> Part {
+        Part {
+            path: path.to_path_buf(),
+            label,
+            offset_secs,
+        }
+    }
+
+    fn said(start: f64, text: &str) -> Vec<SpeechSegment> {
+        vec![SpeechSegment {
+            start,
+            text: text.to_string(),
+        }]
+    }
+
     fn touch(dir: &Path, name: &str) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, "audio").unwrap();
@@ -490,7 +564,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let first = touch(dir.path(), "system_chunk_000.wav");
         let second = touch(dir.path(), "system_chunk_001.wav");
-        let parts = [(first.clone(), "[System]"), (second.clone(), "[System]")];
+        let parts = [
+            part(&first, "[System]", 0.0),
+            part(&second, "[System]", 600.0),
+        ];
         let calls = RefCell::new(Vec::new());
 
         let failed = transcribe_parts(&parts, dir.path(), false, |path| {
@@ -498,13 +575,13 @@ mod tests {
             if path == second {
                 anyhow::bail!("rate limit")
             }
-            Ok("one".to_string())
+            Ok(said(0.0, "one"))
         });
         assert!(failed.unwrap_err().to_string().contains("1 of 2"));
 
         let transcript = transcribe_parts(&parts, dir.path(), false, |path| {
             calls.borrow_mut().push(path.to_path_buf());
-            Ok("two".to_string())
+            Ok(said(0.0, "two"))
         })
         .unwrap();
 
@@ -513,15 +590,35 @@ mod tests {
     }
 
     #[test]
-    fn labels_appear_only_with_several_sources() {
-        let mut transcript = String::new();
-        append_part(&mut transcript, "hello", "[Mic]", true);
-        append_part(&mut transcript, "", "[Mic]", true);
-        assert_eq!(transcript, "[Mic] hello");
+    fn sources_are_interleaved_by_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = touch(dir.path(), "system.wav");
+        let mic = touch(dir.path(), "mic.wav");
+        let parts = [part(&system, "[System]", 0.0), part(&mic, "[Mic]", 0.0)];
 
-        let mut single = String::new();
-        append_part(&mut single, "hello", "[Mic]", false);
-        assert_eq!(single, "hello");
+        let transcript = transcribe_parts(&parts, dir.path(), true, |path| {
+            Ok(if path == system {
+                [
+                    said(0.0, "How are you?"),
+                    said(4.0, "Good."),
+                    said(9.0, "Bye."),
+                ]
+                .concat()
+            } else {
+                [
+                    said(2.0, "Fine, you?"),
+                    said(3.0, " "),
+                    said(6.0, "See you."),
+                ]
+                .concat()
+            })
+        })
+        .unwrap();
+
+        assert_eq!(
+            transcript,
+            "[System] How are you?\n[Mic] Fine, you?\n[System] Good.\n[Mic] See you.\n[System] Bye."
+        );
     }
 
     #[test]

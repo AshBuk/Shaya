@@ -136,12 +136,16 @@ impl ListenRecorder {
 
         // Fallback to PipeWire native
         if crate::core::utils::command_exists("pw-record") {
-            if let Some(monitor) = Self::find_pipewire_monitor() {
+            if let Some(sink) = Self::find_pipewire_sink() {
                 return Ok((
                     "pw-record",
                     vec![
+                        // Record what the sink plays. PipeWire has no `<sink>.monitor`
+                        // node, and an unknown target falls back to the microphone.
+                        "-P".to_string(),
+                        "{ stream.capture.sink=true }".to_string(),
                         "--target".to_string(),
-                        monitor,
+                        sink,
                         "--format=s16".to_string(),
                         "--rate=16000".to_string(),
                         "--channels=1".to_string(),
@@ -154,8 +158,8 @@ impl ListenRecorder {
         Err("No monitor source found. Make sure audio is playing.".to_string())
     }
 
-    /// Find PipeWire monitor source (uses default sink's monitor)
-    fn find_pipewire_monitor() -> Option<String> {
+    /// Find the default PipeWire sink, recorded through its monitor ports
+    fn find_pipewire_sink() -> Option<String> {
         let sink = command_stdout("wpctl", &["inspect", "@DEFAULT_AUDIO_SINK@"])
             .and_then(|stdout| parse_wpctl_sink(&stdout))
             .or_else(|| {
@@ -163,9 +167,8 @@ impl ListenRecorder {
                     .and_then(|stdout| parse_pw_metadata_sink(&stdout))
             })?;
 
-        let monitor = format!("{}.monitor", sink);
-        tracing::info!("Found PipeWire default sink monitor: {}", monitor);
-        Some(monitor)
+        tracing::info!("Found PipeWire default sink: {}", sink);
+        Some(sink)
     }
 
     /// Find PulseAudio monitor source (uses default sink's monitor)

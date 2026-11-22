@@ -271,6 +271,11 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
     opts.insert("handle_token".to_string(), token.to_variant());
     opts.insert("interactive".to_string(), true.to_variant());
 
+    // Subscribe before calling: a quick answer can arrive before the call returns.
+    let connection = proxy.connection();
+    let expected_path = portal_request_path(&connection, &token);
+    let mut request = PortalRequest::subscribe(&connection, &expected_path);
+
     let params = ("", opts).to_variant();
     let reply = proxy
         .call_future("Screenshot", Some(&params), gio::DBusCallFlags::NONE, -1)
@@ -280,11 +285,13 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
     let (handle_path,) = reply
         .get::<(String,)>()
         .ok_or_else(|| "Portal returned invalid request handle".to_string())?;
+    // A portal that ignores handle_token picks its own path.
+    if handle_path != expected_path {
+        request = PortalRequest::subscribe(&connection, &handle_path);
+    }
 
-    let connection = proxy.connection();
-
-    let (response_code, response_data) =
-        wait_portal_response(&connection, &handle_path, Duration::from_secs(30)).await?;
+    // The dialog waits for the user to pick an area, which can take a while.
+    let (response_code, response_data) = request.wait(Duration::from_secs(300)).await?;
 
     if response_code != 0 {
         return match response_code {
@@ -314,41 +321,57 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
     Ok(true)
 }
 
-async fn wait_portal_response(
-    connection: &gio::DBusConnection,
-    handle_path: &str,
-    timeout: Duration,
-) -> Result<PortalResponse, String> {
-    let result: SharedPortalResult = std::rc::Rc::new(std::cell::RefCell::new(None));
+/// Request object path the portal uses for `token`, as the portal spec defines it.
+fn portal_request_path(connection: &gio::DBusConnection, token: &str) -> String {
+    let sender = connection
+        .unique_name()
+        .map(|name| name.trim_start_matches(':').replace('.', "_"))
+        .unwrap_or_default();
+    format!("/org/freedesktop/portal/desktop/request/{sender}/{token}")
+}
 
-    let result_c = result.clone();
-    let _subscription = connection.subscribe_to_signal(
-        Some("org.freedesktop.portal.Desktop"),
-        Some("org.freedesktop.portal.Request"),
-        Some("Response"),
-        Some(handle_path),
-        None,
-        gio::DBusSignalFlags::NONE,
-        move |signal| {
-            let params = signal.parameters;
-            let parsed = params
-                .get::<(u32, std::collections::HashMap<String, glib::Variant>)>()
-                .ok_or_else(|| "Portal response payload has unexpected format".to_string());
-            *result_c.borrow_mut() = Some(parsed);
-        },
-    );
+/// Subscription to the Response signal of one portal request.
+struct PortalRequest {
+    result: SharedPortalResult,
+    _subscription: gio::SignalSubscription,
+}
 
-    let started = Instant::now();
-    loop {
-        if let Some(done) = result.borrow_mut().take() {
-            return done;
+impl PortalRequest {
+    fn subscribe(connection: &gio::DBusConnection, handle_path: &str) -> Self {
+        let result: SharedPortalResult = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let result_c = result.clone();
+        let subscription = connection.subscribe_to_signal(
+            Some("org.freedesktop.portal.Desktop"),
+            Some("org.freedesktop.portal.Request"),
+            Some("Response"),
+            Some(handle_path),
+            None,
+            gio::DBusSignalFlags::NONE,
+            move |signal| {
+                let parsed = signal
+                    .parameters
+                    .get::<PortalResponse>()
+                    .ok_or_else(|| "Portal response payload has unexpected format".to_string());
+                *result_c.borrow_mut() = Some(parsed);
+            },
+        );
+        Self {
+            result,
+            _subscription: subscription,
         }
+    }
 
-        if started.elapsed() >= timeout {
-            return Err("Portal screenshot timed out".to_string());
+    async fn wait(self, timeout: Duration) -> Result<PortalResponse, String> {
+        let started = Instant::now();
+        loop {
+            if let Some(done) = self.result.borrow_mut().take() {
+                return done;
+            }
+            if started.elapsed() >= timeout {
+                return Err("Portal screenshot timed out".to_string());
+            }
+            glib::timeout_future(Duration::from_millis(50)).await;
         }
-
-        glib::timeout_future(Duration::from_millis(50)).await;
     }
 }
 

@@ -79,7 +79,9 @@ fn build_controls(
     let state_c = state.clone();
     mic_toggle.connect_active_notify(move |row| {
         state_c.borrow_mut().settings.meeting_record_mic = row.is_active();
-        let _ = state_c.borrow().save();
+        if let Err(e) = state_c.borrow().save() {
+            tracing::error!("Failed to save state: {}", e);
+        }
     });
 
     // AdwSwitchRow can only be placed into a GtkListBox
@@ -334,7 +336,14 @@ fn build_meeting_actions(
     // Status-dependent transcription pipeline buttons
     actions.append(&build_transcription_controls(meeting, state, container));
 
-    // Delete button
+    // Recording, conversion and transcription still write to the meeting directory.
+    if matches!(
+        meeting.status,
+        MeetingStatus::Recording | MeetingStatus::Converting | MeetingStatus::Transcribing
+    ) {
+        return actions;
+    }
+
     let delete_btn = Button::from_icon_name("user-trash-symbolic");
     delete_btn.set_tooltip_text(Some("Delete meeting"));
     delete_btn.add_css_class("flat");
