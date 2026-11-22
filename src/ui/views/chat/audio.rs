@@ -17,7 +17,18 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Button, TextBuffer};
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
+
+/// A finished recording, removed once dropped. A failed transcription keeps it
+/// for Retry, and a dismissed error drops it.
+struct Recording(PathBuf);
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
 
 /// Handle microphone recording button click
 pub fn handle_audio_click(
@@ -39,7 +50,7 @@ pub fn handle_audio_click(
             }
         };
 
-        transcribe_and_insert(audio_path, state, status, input, None);
+        transcribe_and_insert(Recording(audio_path), state, status, input, None);
     } else {
         // A new file per recording: the previous one may still be uploading.
         let started = utils::temp_path("voice", "wav")
@@ -75,7 +86,13 @@ pub fn handle_listen_click(
             }
         };
 
-        transcribe_and_insert(audio_path, state, status, input, Some("🎧 [Heard]: "));
+        transcribe_and_insert(
+            Recording(audio_path),
+            state,
+            status,
+            input,
+            Some("🎧 [Heard]: "),
+        );
     } else {
         let started = utils::temp_path("listen", "wav")
             .map_err(|e| e.to_string())
@@ -93,11 +110,11 @@ pub fn handle_listen_click(
 /// Transcribe audio and insert result into the input
 /// Uses VAD to skip transcription if no speech detected
 fn transcribe_and_insert(
-    audio_path: std::path::PathBuf,
+    recording: Recording,
     state: &Rc<RefCell<AppState>>,
     status: &StatusBar,
     input: &TextBuffer,
-    prefix: Option<&str>,
+    prefix: Option<&'static str>,
 ) {
     let (stt_provider, stt_key, stt_model) = {
         let s = state.borrow();
@@ -108,16 +125,21 @@ fn transcribe_and_insert(
         )
     };
     if stt_key.is_empty() {
-        let _ = std::fs::remove_file(&audio_path);
-        status.error("Set STT API key in Settings");
+        offer_retry(
+            recording,
+            state,
+            status,
+            input,
+            prefix,
+            "Set STT API key in Settings",
+        );
         return;
     }
 
     // VAD check: skip transcription if no speech detected
     let vad_config = VadConfig::default();
-    if let Some(vad_result) = analyze_audio_file(&audio_path, &vad_config) {
+    if let Some(vad_result) = analyze_audio_file(&recording.0, &vad_config) {
         if !vad_result.has_speech {
-            let _ = std::fs::remove_file(&audio_path);
             tracing::info!(
                 "VAD: No speech detected (rms={:.4}, peak={:.4})",
                 vad_result.avg_rms,
@@ -136,22 +158,22 @@ fn transcribe_and_insert(
 
     status.busy("Transcribing…");
 
+    let state = state.clone();
     let status = status.clone();
     let input = input.clone();
-    let prefix_owned = prefix.map(|s| s.to_string());
+    let audio_path = recording.0.clone();
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            let result = client.transcribe(&audio_path).map_err(|e| e.to_string());
-            let _ = std::fs::remove_file(&audio_path);
-            result
+            client.transcribe(&audio_path).map_err(|e| e.to_string())
         })
         .await;
 
         match result {
             Ok(Ok(text)) => {
-                let formatted = match &prefix_owned {
+                drop(recording);
+                let formatted = match prefix {
                     Some(p) => format!("{}{}", p, text),
                     None => text,
                 };
@@ -164,8 +186,30 @@ fn transcribe_and_insert(
                 input.set_text(&new_text);
                 status.clear();
             }
-            Ok(Err(e)) => status.error(&e),
-            Err(e) => status.error(&format!("Transcription failed: {:?}", e)),
+            Ok(Err(e)) => offer_retry(recording, &state, &status, &input, prefix, &e),
+            Err(e) => offer_retry(
+                recording,
+                &state,
+                &status,
+                &input,
+                prefix,
+                &format!("Transcription failed: {:?}", e),
+            ),
         }
+    });
+}
+
+/// Show the error with a Retry that transcribes the same recording again.
+fn offer_retry(
+    recording: Recording,
+    state: &Rc<RefCell<AppState>>,
+    status: &StatusBar,
+    input: &TextBuffer,
+    prefix: Option<&'static str>,
+    error: &str,
+) {
+    let (state_c, status_c, input_c) = (state.clone(), status.clone(), input.clone());
+    status.error_with_retry(error, move || {
+        transcribe_and_insert(recording, &state_c, &status_c, &input_c, prefix);
     });
 }

@@ -13,12 +13,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+type RetryAction = Box<dyn FnOnce()>;
+
 #[derive(Clone)]
 pub(crate) struct StatusBar {
     pub root: GtkBox,
     message: GtkBox,
     spinner: Spinner,
     label: Label,
+    retry: Button,
+    /// Runs on Retry. Dropped with the error it belongs to.
+    retry_action: Rc<RefCell<Option<RetryAction>>>,
     dismiss: Button,
     activity: GtkBox,
     activity_label: Label,
@@ -44,6 +49,12 @@ impl StatusBar {
         label.set_selectable(true);
         label.set_focusable(false);
 
+        let retry = Button::with_label("Retry");
+        retry.add_css_class("flat");
+        retry.add_css_class("small-action");
+        retry.set_valign(Align::Start);
+        retry.set_visible(false);
+
         let dismiss = Button::from_icon_name("window-close-symbolic");
         dismiss.add_css_class("flat");
         dismiss.add_css_class("small-action");
@@ -55,6 +66,7 @@ impl StatusBar {
         message.set_visible(false);
         message.append(&spinner);
         message.append(&label);
+        message.append(&retry);
         message.append(&dismiss);
 
         let dot = GtkBox::new(Orientation::Horizontal, 0);
@@ -89,6 +101,8 @@ impl StatusBar {
             message,
             spinner,
             label,
+            retry,
+            retry_action: Rc::default(),
             dismiss,
             activity,
             activity_label,
@@ -108,6 +122,14 @@ impl StatusBar {
         let status_c = status.clone();
         status.dismiss.connect_clicked(move |_| status_c.clear());
 
+        let action = status.retry_action.clone();
+        status.retry.connect_clicked(move |_| {
+            let run = action.borrow_mut().take();
+            if let Some(run) = run {
+                run();
+            }
+        });
+
         status
     }
 
@@ -124,6 +146,13 @@ impl StatusBar {
         self.dismiss.set_visible(true);
     }
 
+    /// A failure the user can retry with `action`.
+    pub fn error_with_retry(&self, text: &str, action: impl FnOnce() + 'static) {
+        self.error(text);
+        *self.retry_action.borrow_mut() = Some(Box::new(action));
+        self.retry.set_visible(true);
+    }
+
     /// A short note that hides by itself.
     pub fn flash(&self, text: &str) {
         self.show(text, "neutral");
@@ -138,6 +167,7 @@ impl StatusBar {
     pub fn clear(&self) {
         self.cancel_timer();
         self.spinner.stop();
+        self.drop_retry();
         self.message.set_visible(false);
     }
 
@@ -176,9 +206,17 @@ impl StatusBar {
         self.spinner.stop();
         self.spinner.set_visible(false);
         self.dismiss.set_visible(false);
+        self.drop_retry();
         self.label.set_text(text);
         self.message.set_css_classes(&["chat-status", class]);
         self.message.set_visible(true);
+    }
+
+    fn drop_retry(&self) {
+        self.retry.set_visible(false);
+        // Take first: dropping the action can touch the status bar.
+        let action = self.retry_action.borrow_mut().take();
+        drop(action);
     }
 
     fn cancel_timer(&self) {
