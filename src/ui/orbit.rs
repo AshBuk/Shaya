@@ -1,6 +1,7 @@
 //! Compact launcher and radial section navigation.
 
 use super::header;
+use super::layer_shell::{self, Visible};
 use crate::core::state::AppState;
 use gtk4::prelude::*;
 use gtk4::{
@@ -9,6 +10,10 @@ use gtk4::{
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+/// Side of the ring area, and of the orb button at its centre
+const RING: i32 = 300;
+const ORB: i32 = 88;
 
 pub fn install(
     window: &ApplicationWindow,
@@ -23,7 +28,7 @@ pub fn install(
     orbit.set_halign(Align::Center);
     orbit.set_valign(Align::Center);
     orbit.add_css_class("orbit");
-    orbit.set_size_request(300, 300);
+    orbit.set_size_request(RING, RING);
     orbit.set_visible(false);
     root.set_child(Some(&panel));
     root.add_overlay(&orbit);
@@ -48,7 +53,7 @@ pub fn install(
 
     let center = Button::new();
     center.add_css_class("orbit-center");
-    center.set_size_request(88, 88);
+    center.set_size_request(ORB, ORB);
     center.set_tooltip_text(Some("Open sections · drag to move"));
     if let Ok(texture) = gtk4::gdk::Texture::from_bytes(&gtk4::glib::Bytes::from_static(
         include_bytes!("../../icons/shaya.png"),
@@ -88,12 +93,14 @@ pub fn install(
             118.0 + 104.0 * angle.cos(),
             118.0 + 104.0 * angle.sin(),
         );
-        let (panel, orbit, stack) = (panel.clone(), orbit.clone(), stack.clone());
+        let (window, panel, orbit, stack) =
+            (window.clone(), panel.clone(), orbit.clone(), stack.clone());
         button.connect_clicked(move |_| {
             orbit.set_visible(false);
             panel.set_opacity(1.0);
             panel.set_sensitive(true);
             stack.set_visible_child_name(&name);
+            layer_shell::fit(&window, Visible::Window);
         });
         nodes.push(button);
     }
@@ -128,13 +135,14 @@ pub fn install(
     });
 
     let toggle = {
-        let (expanded, nodes) = (expanded.clone(), nodes.clone());
+        let (window, expanded, nodes) = (window.clone(), expanded.clone(), nodes.clone());
         move |open: bool| {
             expanded.set(open);
             links.set_visible(open);
             for node in &nodes {
                 node.set_visible(open);
             }
+            layer_shell::fit(&window, Visible::Centered(if open { RING } else { ORB }));
         }
     };
     let toggle = Rc::new(toggle);

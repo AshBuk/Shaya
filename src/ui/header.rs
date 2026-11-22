@@ -160,11 +160,14 @@ pub(super) fn setup_drag_gesture(
     drag.connect_drag_update(move |gesture, offset_x, offset_y| {
         #[cfg(target_os = "linux")]
         {
-            use gtk4_layer_shell::{Edge, LayerShell};
+            use gtk4_layer_shell::LayerShell;
             if window_c.is_layer_window() {
                 let (start_x, start_y) = window_pos_c.get();
-                window_c.set_margin(Edge::Left, start_x + offset_x as i32);
-                window_c.set_margin(Edge::Top, start_y + offset_y as i32);
+                super::layer_shell::place(
+                    &window_c,
+                    start_x + offset_x as i32,
+                    start_y + offset_y as i32,
+                );
                 return;
             }
         }

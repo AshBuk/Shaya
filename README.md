@@ -38,7 +38,7 @@ Bring your own API key — Anthropic, OpenAI, or Groq. LLM supports all three pr
 
 Most existing AI assistants of that class ship bloated Electron/WebView wrappers that eat RAM and feel alien on Linux.
 
-Shaya is a **boutique tool** built for Linux users who care about their stack:
+Shaya is a tool built for Linux users who care about their stack:
 
 - **GTK4 + libadwaita** — GNU/GNOME native, first-class Wayland citizen
 - **Layer Shell** — compositor-level overlay via wlr-layer-shell protocol
