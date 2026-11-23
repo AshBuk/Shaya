@@ -15,6 +15,8 @@ bindsym $mod+a exec shaya
 
 On KDE and GNOME, add a custom shortcut with the command `shaya` in the keyboard settings. Ctrl+Q quits.
 
+The AppImage answers to the same command once it is on your `PATH` as `shaya`, see [Install](../README.md#install). Otherwise bind the key to the full path of the file.
+
 ## What the overlay does
 
 | Area | Behavior |

@@ -3,11 +3,11 @@
 
 # Shaya
 
-**Native AI assistant for Linux, built with Rust and GTK4.**
+**AI assistant overlay for Linux with cloud or local models. Native GTK4, Rust, Wayland.**
 
 </div>
 
-Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. A fast and quiet tool during deep work. 
+Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. Use a cloud provider with your own key or a model running on your machine. A fast and quiet tool during deep work.
 
 On Wayland it runs as a compositor overlay.
 
@@ -21,6 +21,7 @@ One Rust binary, pure GTK4.
 | **Voice Capture** | Record microphone or system audio, automatic transcription |
 | **Screenshots** | Full screen or area selection, auto-attached to chat as context |
 | **Meeting Recorder** | Capture mic + system audio, transcribe, get AI analysis |
+| **Live Assistant** | Listens to a call, transcribes it in short chunks and suggests what to say when a question comes up |
 | **Prompt Library** | Manage and switch system prompts for different scenarios |
 | **Cheatsheets** | Quick-access markdown notes with live preview |
 | **Conversation History** | Browse, continue, or delete past sessions |
@@ -30,9 +31,31 @@ One Rust binary, pure GTK4.
 | **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any cloud provider |
 | **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor |
 
-Bring your own API key for Anthropic, OpenAI or Groq. For chat you can also point Shaya at an OpenAI-compatible server such as llama.cpp, Ollama, LM Studio or vLLM: set its URL in Settings, the key is optional, and the model list comes from the server. The default `http://127.0.0.1:8080/v1` is the llama.cpp port. Ollama listens on 11434, LM Studio on 1234 and vLLM on 8000, so for them change the port and keep `/v1`. Screenshots reach a local model when it reads images, for llama.cpp that means a server started with `--mmproj`.
+## Providers
 
-Speech-to-text goes through Groq or OpenAI, so voice capture, meetings and Live still need one of their keys. Groq is recommended for STT and fast responses.
+Requests go straight from Shaya to the provider, with your own key.
+
+| Provider | Chat | Speech-to-text |
+|---|---|---|
+| Groq | yes | yes |
+| OpenAI | yes | yes |
+| Anthropic | yes | no |
+| OpenAI-compatible server | yes | no |
+
+Voice capture, meetings and Live Assistant need speech-to-text, so they take a Groq or OpenAI key. Groq is recommended for STT and fast responses.
+
+### Local models
+
+Choose OpenAI-compatible as the provider in Settings and enter the server URL. The key is optional, and the model list comes from the server.
+
+| Server | URL |
+|---|---|
+| llama.cpp | `http://127.0.0.1:8080/v1`, the default |
+| Ollama | `http://127.0.0.1:11434/v1` |
+| LM Studio | `http://127.0.0.1:1234/v1` |
+| vLLM | `http://127.0.0.1:8000/v1` |
+
+Screenshots reach a local model when it reads images. For llama.cpp that means a server started with `--mmproj`, or a model loaded with `-hf` that ships one. For a text-only model, turn off Reads Images in Settings and screenshots go to the image model of a cloud provider.
 
 ---
 
@@ -42,22 +65,37 @@ Most existing AI assistants of that class ship bloated Electron/WebView wrappers
 
 Shaya is a tool built for Linux users who care about their stack:
 
-- **GTK4 + libadwaita** — GNU/GNOME native, first-class Wayland citizen
-- **Layer Shell** — compositor-level overlay via wlr-layer-shell protocol
-- **Privacy-first** — your API keys stay local, nothing phones home
+- **GTK4 + libadwaita**: GNU/GNOME native, first-class Wayland citizen
+- **Layer Shell**: compositor-level overlay via wlr-layer-shell protocol
+- **Privacy-first**: your API keys stay local and nothing phones home. With a local model, chats never leave your machine
 - **Single binary**
 
 #### Overlay Behavior
 
-Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears during screen sharing depends on your compositor:
-
-> See the [Overlay Guide](docs/OVERLAY_GUIDE.md) for compositor setup and screen sharing.
+Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears during screen sharing depends on your compositor, see the [Overlay Guide](docs/OVERLAY_GUIDE.md) for compositor setup and screen sharing.
 
 ---
 
 ## Install
 
-Shaya builds from source into one binary. COPR and AUR packages are planned.
+Fedora 44 and newer, from [COPR](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/):
+
+```bash
+sudo dnf copr enable ashbuk/shaya
+sudo dnf install shaya
+```
+
+Arch Linux, from the [AUR](https://aur.archlinux.org/packages/shaya): `paru -S shaya` or `yay -S shaya`.
+
+Any distribution: download `Shaya-*-x86_64.AppImage` from [Releases](https://github.com/AshBuk/Shaya/releases/latest) and put it on your `PATH` as `shaya`, so the shortcut command stays the same:
+
+```bash
+install -m755 Shaya-*-x86_64.AppImage ~/.local/bin/shaya
+```
+
+The AppImage carries update information for AppImageUpdate.
+
+### From source
 
 Install [Rust](https://rustup.rs) and the system libraries:
 
