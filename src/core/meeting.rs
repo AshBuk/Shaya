@@ -447,12 +447,7 @@ fn remove_converted_wavs(dir: &Path) {
 
 /// Analyze a meeting transcript using AI.
 /// Call this from a blocking thread.
-pub fn analyze_meeting(
-    meeting_id: &str,
-    provider: crate::core::state::AiProvider,
-    api_key: &str,
-    model: &str,
-) -> Result<String> {
+pub fn analyze_meeting(meeting_id: &str, route: &crate::core::state::ChatRoute) -> Result<String> {
     use crate::core::api::LlmClient;
     use crate::core::state::{Message, Role};
 
@@ -463,7 +458,7 @@ pub fn analyze_meeting(
         anyhow::bail!("Transcript is empty for meeting {}", meeting_id);
     }
 
-    let client = LlmClient::new(provider, api_key, model);
+    let client = LlmClient::for_route(route);
 
     let system_prompt =
         "You are a meeting analyst. Analyze the following meeting transcript and provide:\n\

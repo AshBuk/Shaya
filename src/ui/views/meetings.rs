@@ -480,18 +480,10 @@ fn build_transcription_controls(
         analyze_btn.connect_clicked(move |btn| {
             btn.set_sensitive(false);
 
-            let (provider, api_key, model) = {
-                let s = state_c.borrow();
-                (
-                    s.settings.provider,
-                    s.settings.active_api_key().to_string(),
-                    s.settings.active_model().to_string(),
-                )
-            };
-
-            if api_key.is_empty() {
+            let route = state_c.borrow().settings.chat_route(false);
+            if let Some(missing) = route.missing() {
                 btn.set_sensitive(true);
-                btn.set_tooltip_text(Some("Set AI API key in Settings first"));
+                btn.set_tooltip_text(Some(missing));
                 return;
             }
 
@@ -502,8 +494,7 @@ fn build_transcription_controls(
             glib::spawn_future_local(async move {
                 let id = meeting_id_c.clone();
                 let result = gio::spawn_blocking(move || {
-                    meeting::analyze_meeting(&id, provider, &api_key, &model)
-                        .map_err(|e| e.to_string())
+                    meeting::analyze_meeting(&id, &route).map_err(|e| e.to_string())
                 })
                 .await;
 

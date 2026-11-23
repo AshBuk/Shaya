@@ -4,26 +4,26 @@
 //
 // https://github.com/AshBuk/Shaya
 
-//! Unified LLM client with multi-provider support (Groq, OpenAI, Anthropic)
+//! Unified LLM client: Groq, OpenAI, Anthropic and any OpenAI-compatible server
 
 use super::{agent, request_error};
 use crate::core::models::{max_images, supports_effort};
-use crate::core::state::{AiProvider, Message, Role};
+use crate::core::state::{AiProvider, ChatRoute, Message, Role};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const ANTHROPIC_MAX_TOKENS: u32 = 16384;
 const TRUNCATED_NOTE: &str = "\n\n[Response cut off at the token limit]";
 
-fn max_tokens(provider: AiProvider) -> u32 {
+/// Output limit of the OpenAI-format providers. A server the user runs keeps its own
+/// default, which the context it was started with bounds.
+fn openai_max_tokens(provider: AiProvider) -> Option<u32> {
     match provider {
-        AiProvider::Groq => 8192,
-        AiProvider::OpenAI => 16384,
-        AiProvider::Anthropic => 16384,
+        AiProvider::Groq => Some(8192),
+        AiProvider::OpenAI => Some(16384),
+        AiProvider::Anthropic | AiProvider::OpenAICompatible => None,
     }
 }
 
@@ -33,6 +33,7 @@ pub struct LlmClient {
     provider: AiProvider,
     api_key: String,
     model: String,
+    base_url: String,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -45,7 +46,44 @@ pub struct ChatOptions {
     pub max_output_tokens: Option<u32>,
 }
 
-// OpenAI-compatible response (Groq & OpenAI)
+#[derive(Deserialize)]
+struct ModelList {
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// Models an OpenAI-compatible server serves, from its `/models`
+pub fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>> {
+    let url = endpoint(base_url, "models");
+    let list: ModelList = bearer(agent().get(&url), api_key)
+        .call()
+        .map_err(|e| match e {
+            ureq::Error::Transport(_) => anyhow::anyhow!("Nothing answers at {}", base_url.trim()),
+            status => request_error("Server", status),
+        })?
+        .into_json()
+        .map_err(|_| anyhow::anyhow!("{url} returned no model list"))?;
+    Ok(list.data.into_iter().map(|m| m.id).collect())
+}
+
+fn endpoint(base_url: &str, path: &str) -> String {
+    format!("{}/{path}", base_url.trim().trim_end_matches('/'))
+}
+
+/// A local server started without a key takes requests without the header.
+fn bearer(request: ureq::Request, api_key: &str) -> ureq::Request {
+    if api_key.is_empty() {
+        request
+    } else {
+        request.set("Authorization", &format!("Bearer {api_key}"))
+    }
+}
+
+// OpenAI-compatible response
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
@@ -93,6 +131,14 @@ impl LlmClient {
             provider,
             api_key: api_key.to_string(),
             model: model.to_string(),
+            base_url: provider.default_base_url().to_string(),
+        }
+    }
+
+    pub fn for_route(route: &ChatRoute) -> Self {
+        Self {
+            base_url: route.base_url.clone(),
+            ..Self::new(route.provider, &route.api_key, &route.model)
         }
     }
 
@@ -109,20 +155,9 @@ impl LlmClient {
         options: ChatOptions,
     ) -> Result<String> {
         match self.provider {
-            AiProvider::Groq => {
-                self.openai_compatible(GROQ_API_URL, messages, system_prompt, options)
-            }
-            AiProvider::OpenAI => {
-                self.openai_compatible(OPENAI_API_URL, messages, system_prompt, options)
-            }
             AiProvider::Anthropic => self.anthropic(messages, system_prompt, options),
+            _ => self.openai_compatible(messages, system_prompt, options),
         }
-    }
-
-    fn output_limit(&self, options: ChatOptions) -> u32 {
-        options
-            .max_output_tokens
-            .unwrap_or_else(|| max_tokens(self.provider))
     }
 
     fn openai_body(
@@ -152,21 +187,24 @@ impl LlmClient {
             AiProvider::OpenAI => "max_completion_tokens",
             _ => "max_tokens",
         };
-        request[limit_field] = json!(self.output_limit(options));
+        if let Some(limit) = options
+            .max_output_tokens
+            .or(openai_max_tokens(self.provider))
+        {
+            request[limit_field] = json!(limit);
+        }
         request
     }
 
-    /// OpenAI-compatible chat completion (Groq & OpenAI)
+    /// OpenAI-format chat completion (all providers but Anthropic)
     fn openai_compatible(
         &self,
-        url: &str,
         messages: &[Message],
         system_prompt: &str,
         options: ChatOptions,
     ) -> Result<String> {
-        let response = agent()
-            .post(url)
-            .set("Authorization", &format!("Bearer {}", self.api_key))
+        let request = agent().post(&endpoint(&self.base_url, "chat/completions"));
+        let response = bearer(request, &self.api_key)
             .set("Content-Type", "application/json")
             .send_json(self.openai_body(messages, system_prompt, options))
             .map_err(|e| request_error(self.provider.display_name(), e))?;
@@ -194,7 +232,7 @@ impl LlmClient {
 
         let mut request = json!({
             "model": self.model,
-            "max_tokens": self.output_limit(options),
+            "max_tokens": options.max_output_tokens.unwrap_or(ANTHROPIC_MAX_TOKENS),
             "messages": chat_messages
         });
         if !system_prompt.is_empty() {
@@ -214,7 +252,7 @@ impl LlmClient {
         options: ChatOptions,
     ) -> Result<String> {
         let response = agent()
-            .post(ANTHROPIC_API_URL)
+            .post(&endpoint(&self.base_url, "messages"))
             .set("x-api-key", &self.api_key)
             .set("anthropic-version", ANTHROPIC_VERSION)
             .set("Content-Type", "application/json")
@@ -490,6 +528,34 @@ mod tests {
         assert!(openai_body.get("max_tokens").is_none());
         assert_eq!(openai_body["max_completion_tokens"], 16384);
         assert_eq!(groq_body["max_tokens"], 8192);
+    }
+
+    #[test]
+    fn compatible_server_keeps_its_own_output_limit() {
+        let messages = [user_message("hi")];
+        let local = LlmClient::new(AiProvider::OpenAICompatible, "", "qwen3.5-4b");
+        let lowered = ChatOptions {
+            max_output_tokens: Some(100),
+            ..ChatOptions::default()
+        };
+
+        assert!(local
+            .openai_body(&messages, "", ChatOptions::default())
+            .get("max_tokens")
+            .is_none());
+        assert_eq!(local.openai_body(&messages, "", lowered)["max_tokens"], 100);
+    }
+
+    #[test]
+    fn endpoint_tolerates_a_trailing_slash() {
+        assert_eq!(
+            endpoint(" http://127.0.0.1:8080/v1/ ", "models"),
+            "http://127.0.0.1:8080/v1/models"
+        );
+        assert_eq!(
+            endpoint(AiProvider::Groq.default_base_url(), "chat/completions"),
+            "https://api.groq.com/openai/v1/chat/completions"
+        );
     }
 
     #[test]

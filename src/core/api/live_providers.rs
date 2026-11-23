@@ -51,7 +51,7 @@ fn message(content: &str, image: Option<ImageData>) -> Message {
 }
 
 fn ask(route: &ChatRoute, messages: &[Message], options: ChatOptions) -> String {
-    let reply = LlmClient::new(route.provider, &route.api_key, &route.model)
+    let reply = LlmClient::for_route(route)
         .chat_with_options(messages, "Answer in one word.", options)
         .unwrap_or_else(|e| panic!("{:?} {}: {e}", route.provider, route.model));
     println!("{:?} {}: {reply}", route.provider, route.model);
