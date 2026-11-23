@@ -18,9 +18,10 @@
       voice transcription, screenshots, meeting recording and analysis.
     </p>
     <p>
-      Bring your own API key for Anthropic, OpenAI or Groq. There is no account and
-      no Shaya server: requests go directly to the provider you choose, everything
-      else stays on your machine.
+      Bring your own API key for Anthropic, OpenAI or Groq, or chat with a local
+      model through any OpenAI-compatible server. There is no account and no Shaya
+      server: requests go directly to the provider you choose, everything else stays
+      on your machine.
     </p>
     <p>Features:</p>
     <ul>

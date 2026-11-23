@@ -229,10 +229,9 @@ pub fn send_message(ctx: &ChatContext) {
         (s.settings.chat_route(has_images), s.active_prompt())
     };
     let image_notice = route.image_notice();
-    if route.api_key.is_empty() {
+    if let Some(missing) = route.missing() {
         let hint = image_notice.map_or(String::new(), |notice| format!(", {notice}"));
-        ctx.status
-            .error(&format!("Set an API key in Settings{hint}"));
+        ctx.status.error(&format!("{missing}{hint}"));
         return;
     }
 
@@ -272,7 +271,7 @@ pub fn send_message(ctx: &ChatContext) {
 
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = LlmClient::new(route.provider, &route.api_key, &route.model);
+            let client = LlmClient::for_route(&route);
             client
                 .chat(&messages, &system_prompt)
                 .map_err(|e| e.to_string())

@@ -17,7 +17,7 @@ One Rust binary, pure GTK4.
 
 | | |
 |---|---|
-| **AI Chat** | Groq, OpenAI, Anthropic — conversation with context, markdown rendering, system prompts |
+| **AI Chat** | Groq, OpenAI, Anthropic or a local model through any OpenAI-compatible server. Conversation with context, markdown rendering, system prompts |
 | **Voice Capture** | Record microphone or system audio, automatic transcription |
 | **Screenshots** | Full screen or area selection, auto-attached to chat as context |
 | **Meeting Recorder** | Capture mic + system audio, transcribe, get AI analysis |
@@ -26,11 +26,13 @@ One Rust binary, pure GTK4.
 | **Conversation History** | Browse, continue, or delete past sessions |
 | **Appearance** | Adjustable opacity, light/dark theme |
 | **Quick Toggle** | Running `shaya` again shows or hides the window, see [OVERLAY_GUIDE](docs/OVERLAY_GUIDE.md#toggle-shortcut) |
-| **Privacy** | BYOK (bring your own key): no account and no Shaya servers. Requests go directly to the provider you choose, everything else stays on your machine |
-| **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any provider |
+| **Privacy** | BYOK (bring your own key): no account and no Shaya servers. Requests go directly to the provider you choose or to a server you run, everything else stays on your machine |
+| **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any cloud provider |
 | **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor |
 
-Bring your own API key — Anthropic, OpenAI, or Groq. LLM supports all three providers; STT supports Groq and OpenAI. Groq is especially recommended for STT and fast responses.
+Bring your own API key for Anthropic, OpenAI or Groq. For chat you can also point Shaya at an OpenAI-compatible server such as llama.cpp, Ollama, LM Studio or vLLM: set its URL in Settings, the key is optional, and the model list comes from the server. The default `http://127.0.0.1:8080/v1` is the llama.cpp port. Ollama listens on 11434, LM Studio on 1234 and vLLM on 8000, so for them change the port and keep `/v1`. Screenshots reach a local model when it reads images, for llama.cpp that means a server started with `--mmproj`.
+
+Speech-to-text goes through Groq or OpenAI, so voice capture, meetings and Live still need one of their keys. Groq is recommended for STT and fast responses.
 
 ---
 

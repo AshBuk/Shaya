@@ -73,7 +73,7 @@ impl EmptyState {
         root.append(&title);
 
         let setup = GtkBox::new(Orientation::Vertical, 10);
-        let description = Label::new(Some("Add an API key to start chatting."));
+        let description = Label::new(Some("Add an API key or a local server to start chatting."));
         description.add_css_class("empty-description");
         description.set_wrap(true);
         description.set_justify(gtk4::Justification::Center);
@@ -91,7 +91,8 @@ impl EmptyState {
     }
 
     fn refresh(&self, settings: &Settings) {
-        self.setup.set_visible(settings.active_api_key().is_empty());
+        self.setup
+            .set_visible(settings.chat_route(false).missing().is_some());
     }
 }
 

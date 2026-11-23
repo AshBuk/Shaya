@@ -165,21 +165,24 @@ pub const LEGACY_MODELS: &[&str] = &[
 
 // --- Helpers ---
 
-/// Get model list for a given provider
+/// Get model list for a given provider. An OpenAI-compatible server lists its own.
 pub fn models_for_provider(provider: AiProvider) -> &'static [ModelInfo] {
     match provider {
         AiProvider::Groq => GROQ_MODELS,
         AiProvider::OpenAI => OPENAI_MODELS,
         AiProvider::Anthropic => ANTHROPIC_MODELS,
+        AiProvider::OpenAICompatible => &[],
     }
 }
 
-/// Image model offered when a provider is picked for requests with images
+/// Image model offered when a provider is picked for requests with images.
+/// Settings offer only the cloud providers there: a server of the user's has no catalog.
 pub fn default_vision_model(provider: AiProvider) -> &'static str {
     match provider {
         AiProvider::Groq => DEFAULT_VISION_FALLBACK_MODEL,
         AiProvider::OpenAI => DEFAULT_OPENAI_MODEL,
         AiProvider::Anthropic => DEFAULT_ANTHROPIC_MODEL,
+        AiProvider::OpenAICompatible => "",
     }
 }
 
@@ -245,7 +248,7 @@ mod tests {
 
     #[test]
     fn default_image_models_read_images() {
-        for provider in AiProvider::ALL {
+        for provider in AiProvider::CLOUD {
             let id = default_vision_model(provider);
             assert!(models_for_provider(provider)
                 .iter()

@@ -29,16 +29,38 @@ pub enum AiProvider {
     Groq,
     OpenAI,
     Anthropic,
+    /// A server the user runs, such as llama.cpp, Ollama, LM Studio or vLLM
+    #[serde(rename = "openai-compatible")]
+    OpenAICompatible,
 }
 
 impl AiProvider {
-    pub const ALL: [AiProvider; 3] = [Self::Groq, Self::OpenAI, Self::Anthropic];
+    pub const ALL: [AiProvider; 4] = [
+        Self::Groq,
+        Self::OpenAI,
+        Self::Anthropic,
+        Self::OpenAICompatible,
+    ];
+
+    /// Providers with a model catalog, offered for requests with images
+    pub const CLOUD: [AiProvider; 3] = [Self::Groq, Self::OpenAI, Self::Anthropic];
 
     pub fn display_name(self) -> &'static str {
         match self {
             Self::Groq => "Groq",
             Self::OpenAI => "OpenAI",
             Self::Anthropic => "Anthropic",
+            Self::OpenAICompatible => "OpenAI-compatible",
+        }
+    }
+
+    /// API root, up to and including the version segment
+    pub fn default_base_url(self) -> &'static str {
+        match self {
+            Self::Groq => "https://api.groq.com/openai/v1",
+            Self::OpenAI => "https://api.openai.com/v1",
+            Self::Anthropic => "https://api.anthropic.com/v1",
+            Self::OpenAICompatible => "http://127.0.0.1:8080/v1",
         }
     }
 }
@@ -74,6 +96,13 @@ pub struct Settings {
     pub openai_model: String,
     pub anthropic_api_key: String,
     pub anthropic_model: String,
+    /// Server of the OpenAI-compatible provider, up to and including `/v1`
+    pub compatible_base_url: String,
+    /// Optional: llama.cpp without `--api-key` and Ollama take none
+    pub compatible_api_key: String,
+    pub compatible_model: String,
+    /// The server has no catalog, so the user tells whether its model reads images.
+    pub compatible_vision: bool,
     /// Serves requests with images when the selected model cannot read them
     pub vision_fallback_provider: AiProvider,
     pub vision_fallback_model: String,
@@ -104,11 +133,24 @@ pub struct ChatRoute {
     pub provider: AiProvider,
     pub api_key: String,
     pub model: String,
+    pub base_url: String,
     /// The selected model cannot read images, so this request uses the image model.
     pub image_fallback: bool,
 }
 
 impl ChatRoute {
+    /// What the user still has to enter in Settings before a request can go out
+    pub fn missing(&self) -> Option<&'static str> {
+        match self.provider {
+            AiProvider::OpenAICompatible if self.base_url.trim().is_empty() => {
+                Some("Set the server URL in Settings")
+            }
+            AiProvider::OpenAICompatible => None,
+            _ if self.api_key.is_empty() => Some("Set an API key in Settings"),
+            _ => None,
+        }
+    }
+
     /// Tells the user that images went to another model, which can be another provider.
     pub fn image_notice(&self) -> Option<String> {
         self.image_fallback.then(|| {
@@ -150,12 +192,27 @@ impl Settings {
             AiProvider::Groq => &self.groq_api_key,
             AiProvider::OpenAI => &self.openai_api_key,
             AiProvider::Anthropic => &self.anthropic_api_key,
+            AiProvider::OpenAICompatible => &self.compatible_api_key,
+        }
+    }
+
+    fn base_url_for(&self, provider: AiProvider) -> &str {
+        match provider {
+            AiProvider::OpenAICompatible => &self.compatible_base_url,
+            cloud => cloud.default_base_url(),
+        }
+    }
+
+    fn active_lacks_vision(&self) -> bool {
+        match self.provider {
+            AiProvider::OpenAICompatible => !self.compatible_vision,
+            _ => lacks_vision(self.active_model()),
         }
     }
 
     /// Pick the provider and model for a request
     pub fn chat_route(&self, has_images: bool) -> ChatRoute {
-        let image_fallback = has_images && lacks_vision(self.active_model());
+        let image_fallback = has_images && self.active_lacks_vision();
         let (provider, model) = if image_fallback {
             (
                 self.vision_fallback_provider,
@@ -168,6 +225,7 @@ impl Settings {
             provider,
             api_key: self.api_key_for(provider).to_string(),
             model: model.to_string(),
+            base_url: self.base_url_for(provider).to_string(),
             image_fallback,
         }
     }
@@ -188,6 +246,7 @@ impl Settings {
             AiProvider::Groq => &self.groq_model,
             AiProvider::OpenAI => &self.openai_model,
             AiProvider::Anthropic => &self.anthropic_model,
+            AiProvider::OpenAICompatible => &self.compatible_model,
         }
     }
 
@@ -197,6 +256,7 @@ impl Settings {
             AiProvider::Groq => self.groq_api_key = key,
             AiProvider::OpenAI => self.openai_api_key = key,
             AiProvider::Anthropic => self.anthropic_api_key = key,
+            AiProvider::OpenAICompatible => self.compatible_api_key = key,
         }
     }
 
@@ -206,6 +266,7 @@ impl Settings {
             AiProvider::Groq => self.groq_model = model,
             AiProvider::OpenAI => self.openai_model = model,
             AiProvider::Anthropic => self.anthropic_model = model,
+            AiProvider::OpenAICompatible => self.compatible_model = model,
         }
     }
 
@@ -252,6 +313,10 @@ impl Default for Settings {
             openai_model: DEFAULT_OPENAI_MODEL.to_string(),
             anthropic_api_key: String::new(),
             anthropic_model: DEFAULT_ANTHROPIC_MODEL.to_string(),
+            compatible_base_url: AiProvider::OpenAICompatible.default_base_url().to_string(),
+            compatible_api_key: String::new(),
+            compatible_model: String::new(),
+            compatible_vision: true,
             vision_fallback_provider: AiProvider::Groq,
             vision_fallback_model: DEFAULT_VISION_FALLBACK_MODEL.to_string(),
             model_catalog: MODEL_CATALOG_VERSION,
@@ -662,6 +727,37 @@ mod tests {
 
         assert!(!vision.chat_route(true).image_fallback);
         assert_eq!(custom.chat_route(true).model, "my-vision-model");
+    }
+
+    #[test]
+    fn compatible_server_needs_a_url_not_a_key() {
+        let mut settings = Settings {
+            provider: AiProvider::OpenAICompatible,
+            ..Settings::default()
+        };
+
+        let route = settings.chat_route(false);
+        assert_eq!(route.missing(), None);
+        assert_eq!(route.base_url, "http://127.0.0.1:8080/v1");
+
+        settings.compatible_base_url = " ".to_string();
+        assert!(settings.chat_route(false).missing().is_some());
+        assert!(Settings::default().chat_route(false).missing().is_some());
+    }
+
+    #[test]
+    fn compatible_text_model_sends_images_to_the_image_model() {
+        let mut settings = Settings {
+            provider: AiProvider::OpenAICompatible,
+            compatible_model: "qwen3.5-4b".to_string(),
+            ..Settings::default()
+        };
+        assert_eq!(settings.chat_route(true).model, "qwen3.5-4b");
+
+        settings.compatible_vision = false;
+        let route = settings.chat_route(true);
+        assert_eq!(route.provider, AiProvider::Groq);
+        assert_eq!(route.base_url, AiProvider::Groq.default_base_url());
     }
 
     #[test]

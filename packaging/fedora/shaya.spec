@@ -50,8 +50,9 @@ Recommends:     xdg-utils
 Shaya lives as an overlay on desktop and gives you instant access to AI chat,
 voice transcription, screenshots, meeting recording and analysis.
 
-Bring your own API key for Anthropic, OpenAI or Groq. There is no account and
-no Shaya server: requests go directly to the provider you choose.
+Bring your own API key for Anthropic, OpenAI or Groq, or chat with a local
+model through any OpenAI-compatible server. There is no account and no Shaya
+server: requests go directly to the provider you choose.
 
 %prep
 %autosetup -n Shaya-%{version} -a1

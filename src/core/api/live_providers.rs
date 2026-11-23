@@ -6,7 +6,7 @@
 
 //! Real requests to the providers: billed, ignored by default, see CONTRIBUTING.md.
 
-use super::{ChatOptions, LlmClient, WhisperClient};
+use super::{list_models, ChatOptions, LlmClient, WhisperClient};
 use crate::core::models::{
     models_for_provider, stt_models_for_provider, DEFAULT_GROQ_STT_MODEL, DEFAULT_OPENAI_STT_MODEL,
 };
@@ -51,7 +51,7 @@ fn message(content: &str, image: Option<ImageData>) -> Message {
 }
 
 fn ask(route: &ChatRoute, messages: &[Message], options: ChatOptions) -> String {
-    let reply = LlmClient::new(route.provider, &route.api_key, &route.model)
+    let reply = LlmClient::for_route(route)
         .chat_with_options(messages, "Answer in one word.", options)
         .unwrap_or_else(|e| panic!("{:?} {}: {e}", route.provider, route.model));
     println!("{:?} {}: {reply}", route.provider, route.model);
@@ -102,6 +102,26 @@ fn anthropic_chat() {
         };
         check_text_and_image(&with_provider(AiProvider::Anthropic), live);
     }
+}
+
+/// The first model of a server the user runs. The image question needs a model that
+/// reads images, for llama.cpp a server started with `--mmproj`.
+#[test]
+#[ignore = "needs a running server"]
+fn openai_compatible_chat() {
+    let Some(base_url) = key("SHAYA_SERVER_URL") else {
+        return;
+    };
+    let api_key = std::env::var("SHAYA_SERVER_KEY").unwrap_or_default();
+    let models = list_models(&base_url, &api_key).expect("model list");
+    let settings = Settings {
+        provider: AiProvider::OpenAICompatible,
+        compatible_base_url: base_url,
+        compatible_api_key: api_key,
+        compatible_model: models.first().expect("a served model").clone(),
+        ..Settings::default()
+    };
+    check_text_and_image(&settings, LIMITS);
 }
 
 #[test]

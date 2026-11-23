@@ -12,7 +12,7 @@ pub mod whisper;
 #[cfg(test)]
 mod live_providers;
 
-pub use llm::{ChatOptions, LlmClient};
+pub use llm::{list_models, ChatOptions, LlmClient};
 pub use whisper::{SpeechSegment, WhisperClient};
 
 use serde::Deserialize;

@@ -106,8 +106,8 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
             ctx.status.error("Set STT API key in Settings");
             return;
         }
-        if state.settings.active_api_key().is_empty() {
-            ctx.status.error("Set AI API key in Settings");
+        if let Some(missing) = state.settings.chat_route(false).missing() {
+            ctx.status.error(missing);
             return;
         }
         state.settings.effective_live_chunk_secs()
@@ -528,11 +528,10 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     };
 
     let image_notice = route.image_notice();
-    if route.api_key.is_empty() {
+    if let Some(missing) = route.missing() {
         clear_in_flight(&runtime, range);
         let hint = image_notice.map_or(String::new(), |notice| format!(", {notice}"));
-        ctx.status
-            .error(&format!("Set AI API key in Settings{hint}"));
+        ctx.status.error(&format!("{missing}{hint}"));
         return;
     }
 
@@ -552,7 +551,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     });
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
-            let client = LlmClient::new(route.provider, &route.api_key, &route.model);
+            let client = LlmClient::for_route(&route);
             client
                 .chat_with_options(&messages, &system_prompt, options)
                 .map_err(|e| e.to_string())
