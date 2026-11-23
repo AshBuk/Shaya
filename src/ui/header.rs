@@ -9,39 +9,42 @@
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio;
-use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Label, MenuButton, Orientation};
+use gtk4::{
+    ApplicationWindow, Box as GtkBox, CenterBox, GestureDrag, Label, MenuButton, Orientation,
+};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// Build header bar: section menu, current section, chat actions, window buttons.
+/// Build header bar: section menu and current section, the app name in the
+/// centre, chat actions and window buttons at the end.
 ///
-/// The overlay moves itself and has collapse and hide. A normal window is
-/// the titlebar: the window manager moves it and GTK draws the window buttons.
+/// The overlay moves itself and has collapse and hide. A normal window uses
+/// it as the titlebar: the window manager moves it and GTK draws the buttons.
 pub fn build(
     window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
     overlay: bool,
-) -> GtkBox {
-    let header = GtkBox::new(Orientation::Horizontal, 2);
+) -> CenterBox {
+    let header = CenterBox::new();
     header.add_css_class("shaya-header");
 
-    header.append(&build_navigation(window, stack));
-
-    let brand = Label::new(Some("shaya"));
-    brand.add_css_class("shaya-wordmark");
-    header.append(&brand);
-
+    let start = GtkBox::new(Orientation::Horizontal, 2);
+    start.append(&build_navigation(window, stack));
     let title = Label::new(None);
     title.add_css_class("shaya-title");
-    title.set_hexpand(true);
-    title.set_xalign(0.0);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    header.append(&title);
+    start.append(&title);
+    header.set_start_widget(Some(&start));
 
+    let brand = Label::new(Some("Shaya"));
+    brand.add_css_class("shaya-wordmark");
+    header.set_center_widget(Some(&brand));
+
+    let end = GtkBox::new(Orientation::Horizontal, 2);
     let chat_menu = build_chat_menu();
-    header.append(&chat_menu);
+    end.append(&chat_menu);
 
     let sync_section = move |stack: &adw::ViewStack| {
         if let Some(child) = stack.visible_child() {
@@ -57,12 +60,13 @@ pub fn build(
         collapse.add_css_class("flat");
         collapse.set_tooltip_text(Some("Collapse to Shaya orb"));
         collapse.set_action_name(Some("orbit.collapse"));
-        header.append(&collapse);
-        header.append(&build_hide_button());
+        end.append(&collapse);
+        end.append(&build_hide_button());
         setup_drag_gesture(&header, window, state);
     } else {
-        header.append(&gtk4::WindowControls::new(gtk4::PackType::End));
+        end.append(&gtk4::WindowControls::new(gtk4::PackType::End));
     }
+    header.set_end_widget(Some(&end));
 
     header
 }

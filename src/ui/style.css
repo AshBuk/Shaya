@@ -30,6 +30,11 @@ window.shaya.overlay {
   margin-left: 4px;
 }
 
+.shaya-wordmark {
+  color: @shaya_accent;
+  font-weight: 700;
+}
+
 /* Conversation */
 
 .message-list {
@@ -235,12 +240,6 @@ window.shaya popover > contents {
 window.shaya .suggested-action {
   background-color: @accent_bg_color;
   color: white;
-}
-
-.shaya-wordmark {
-  color: @shaya_accent;
-  font-weight: 700;
-  margin-right: 8px;
 }
 
 .shaya-title {
