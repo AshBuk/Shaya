@@ -48,6 +48,8 @@ GROQ_API_KEY=... ANTHROPIC_API_KEY=... OPENAI_API_KEY=... SHAYA_LIVE_AUDIO=speec
   cargo test --lib live_providers -- --ignored --nocapture --test-threads=1
 ```
 
+`SHAYA_SERVER_URL` points to an OpenAI-compatible server such as `http://127.0.0.1:8080/v1`, and `SHAYA_SERVER_KEY` holds its key if it was started with one. The test asks the first model the server lists, and the image question passes only when that model reads images.
+
 ## Reporting a bug
 
 Include your distribution, compositor and the relevant part of `./dev logs`. Logs can contain your own text, so read them before posting.
