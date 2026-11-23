@@ -1,16 +1,18 @@
 /* Palette (@shaya_*) comes from theme.rs. Keep to CSS that GTK 4.14 can parse. */
 
 window.shaya {
-  background: none;
+  background-color: @shaya_window;
   color: @shaya_fg;
+}
+
+/* The overlay is transparent around its panel and the orb */
+window.shaya.overlay {
+  background: none;
   box-shadow: none;
 }
 
-.shaya-surface {
-  background-color: @shaya_window;
-}
-
 .shaya-surface.floating {
+  background-color: @shaya_window;
   border: 1px solid @shaya_border;
   border-radius: 16px;
 }
@@ -26,6 +28,11 @@ window.shaya {
 .shaya-title {
   font-weight: 600;
   margin-left: 4px;
+}
+
+.shaya-wordmark {
+  color: @shaya_accent;
+  font-weight: 700;
 }
 
 /* Conversation */
@@ -233,12 +240,6 @@ window.shaya popover > contents {
 window.shaya .suggested-action {
   background-color: @accent_bg_color;
   color: white;
-}
-
-.shaya-wordmark {
-  color: @shaya_accent;
-  font-weight: 700;
-  margin-right: 8px;
 }
 
 .shaya-title {

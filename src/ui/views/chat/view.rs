@@ -43,14 +43,12 @@ pub(crate) struct ChatSharedState {
     listener: Rc<RefCell<ListenRecorder>>,
 }
 
-/// First screen of an empty chat: leads to the next useful step.
+/// First screen of an empty chat: the logo and the name, or the way to settings
+/// while there is no API key.
 #[derive(Clone)]
 struct EmptyState {
     root: GtkBox,
-    title: Label,
-    description: Label,
-    setup: Button,
-    shortcuts: GtkBox,
+    setup: GtkBox,
 }
 
 impl EmptyState {
@@ -70,64 +68,30 @@ impl EmptyState {
             root.append(&image);
         }
 
-        let title = Label::new(None);
+        let title = Label::new(Some("Shaya"));
         title.add_css_class("empty-title");
-        title.set_wrap(true);
-        title.set_justify(gtk4::Justification::Center);
         root.append(&title);
 
-        let description = Label::new(None);
+        let setup = GtkBox::new(Orientation::Vertical, 10);
+        let description = Label::new(Some("Add an API key to start chatting."));
         description.add_css_class("empty-description");
         description.set_wrap(true);
         description.set_justify(gtk4::Justification::Center);
-        root.append(&description);
+        setup.append(&description);
 
-        let setup = Button::with_label("Open Settings");
-        setup.add_css_class("pill");
-        setup.add_css_class("suggested-action");
-        setup.set_halign(Align::Center);
-        setup.set_margin_top(10);
-        setup.set_detailed_action_name("nav.section::settings");
+        let open = Button::with_label("Open Settings");
+        open.add_css_class("pill");
+        open.add_css_class("suggested-action");
+        open.set_halign(Align::Center);
+        open.set_detailed_action_name("nav.section::settings");
+        setup.append(&open);
         root.append(&setup);
 
-        let shortcuts = GtkBox::new(Orientation::Horizontal, 6);
-        shortcuts.set_halign(Align::Center);
-        shortcuts.set_margin_top(10);
-        for (text, action) in [
-            ("Capture", "chat.capture-area"),
-            ("Dictate", "chat.dictate"),
-            ("Go Live", "chat.live"),
-        ] {
-            let button = Button::with_label(text);
-            button.add_css_class("pill");
-            button.set_action_name(Some(action));
-            shortcuts.append(&button);
-        }
-        root.append(&shortcuts);
-
-        Self {
-            root,
-            title,
-            description,
-            setup,
-            shortcuts,
-        }
+        Self { root, setup }
     }
 
     fn refresh(&self, settings: &Settings) {
-        let has_key = !settings.active_api_key().is_empty();
-        self.title.set_text(if has_key {
-            "Ask anything"
-        } else {
-            "Connect a model"
-        });
-        self.description.set_text(if has_key {
-            "Type below, capture your screen, or talk."
-        } else {
-            "Add an API key to start chatting."
-        });
-        self.setup.set_visible(!has_key);
-        self.shortcuts.set_visible(has_key);
+        self.setup.set_visible(settings.active_api_key().is_empty());
     }
 }
 
