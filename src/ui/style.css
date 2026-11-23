@@ -1,16 +1,18 @@
 /* Palette (@shaya_*) comes from theme.rs. Keep to CSS that GTK 4.14 can parse. */
 
 window.shaya {
-  background: none;
+  background-color: @shaya_window;
   color: @shaya_fg;
+}
+
+/* The overlay is transparent around its panel and the orb */
+window.shaya.overlay {
+  background: none;
   box-shadow: none;
 }
 
-.shaya-surface {
-  background-color: @shaya_window;
-}
-
 .shaya-surface.floating {
+  background-color: @shaya_window;
   border: 1px solid @shaya_border;
   border-radius: 16px;
 }

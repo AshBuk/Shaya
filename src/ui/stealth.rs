@@ -16,7 +16,7 @@ use crate::core::lock;
 use crate::core::state::AppState;
 use adw::prelude::*;
 use gtk4::gio::{self, ApplicationFlags};
-use gtk4::{gdk, glib, ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, Overlay};
+use gtk4::{glib, ApplicationWindow, Box as GtkBox, GestureDrag, Orientation, Overlay};
 use libadwaita as adw;
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -102,25 +102,28 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     // Apply saved appearance settings
     apply_color_scheme(state.borrow().settings.dark_mode);
 
+    // The overlay is a transparent layer surface: it draws its own frame,
+    // moves and resizes itself and can collapse to the orb. A normal window
+    // (GNOME, X11) leaves all of that to the window manager.
+    let overlay_mode = is_layer_window(&window);
+
     // Build UI structure
     let main_box = GtkBox::new(Orientation::Vertical, 0);
     main_box.add_css_class("shaya-surface");
     main_box.set_overflow(gtk4::Overflow::Hidden);
-    // A normal window already has a frame from the compositor or GTK.
-    #[cfg(target_os = "linux")]
-    {
-        use gtk4_layer_shell::LayerShell;
-        if window.is_layer_window() {
-            main_box.add_css_class("floating");
-        }
-    }
 
     // Create ViewStack first (needed by header for navigation)
     let (stack, chat_shared) = build_view_stack(state.clone());
 
-    // Header bar (navigation + drag handle)
-    let header = header::build(&window, &stack, state.clone());
-    main_box.append(&header);
+    // Header bar: inside the overlay panel, or the titlebar of a normal window
+    let header = header::build(&window, &stack, state.clone(), overlay_mode);
+    if overlay_mode {
+        window.add_css_class("overlay");
+        main_box.add_css_class("floating");
+        main_box.append(&header);
+    } else {
+        window.set_titlebar(Some(&gtk4::WindowHandle::builder().child(&header).build()));
+    }
 
     // Content area
     let content_box = GtkBox::new(Orientation::Vertical, 0);
@@ -132,12 +135,15 @@ fn build_ui(app: &adw::Application, state: Rc<RefCell<AppState>>) {
     let control_panel = build_control_panel(&window, &stack, state.clone(), chat_shared);
     main_box.append(&control_panel);
 
-    // Wrap in overlay for the resize handle
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&main_box));
-    overlay.add_overlay(&build_resize_handle(&window, state.clone()));
-
-    super::orbit::install(&window, &overlay, &stack, state);
+    if overlay_mode {
+        // Wrap in overlay for the resize handle
+        let overlay = Overlay::new();
+        overlay.set_child(Some(&main_box));
+        overlay.add_overlay(&build_resize_handle(&window, state.clone()));
+        super::orbit::install(&window, &overlay, &stack, state);
+    } else {
+        window.set_child(Some(&main_box));
+    }
     window.present();
 }
 
@@ -245,7 +251,7 @@ fn build_control_panel(
     panel
 }
 
-/// Build resize grip (bottom-right corner)
+/// Resize grip in the bottom-right corner of the overlay
 fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>) -> GtkBox {
     let handle = GtkBox::new(Orientation::Horizontal, 0);
     handle.add_css_class("resize-grip");
@@ -258,62 +264,22 @@ fn build_resize_handle(window: &ApplicationWindow, state: Rc<RefCell<AppState>>)
 
     let drag = GestureDrag::new();
 
-    // Drag begin: store current size (layer-shell) or delegate to WM (fallback)
     let window_c = window.clone();
     let start_size_c = start_size.clone();
-    drag.connect_drag_begin(move |gesture, x, y| {
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::LayerShell;
-            if window_c.is_layer_window() {
-                start_size_c.set((window_c.width(), window_c.height()));
-                return;
-            }
-        }
-        // Fallback: delegate resize to window manager (GNOME, etc.)
-        if let Some(surface) = window_c.surface() {
-            if let Some(toplevel) = surface.dynamic_cast_ref::<gdk::Toplevel>() {
-                if let Some(device) = gesture.device() {
-                    toplevel.begin_resize(
-                        gdk::SurfaceEdge::SouthEast,
-                        Some(&device),
-                        gesture.current_button() as i32,
-                        x,
-                        y,
-                        gesture.current_event_time(),
-                    );
-                }
-            }
-        }
+    drag.connect_drag_begin(move |_, _, _| {
+        start_size_c.set((window_c.width(), window_c.height()));
     });
 
-    // Drag update: resize window (layer-shell only, WM handles fallback)
     let window_c = window.clone();
-    let start_size_c = start_size.clone();
     drag.connect_drag_update(move |_, offset_x, offset_y| {
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::LayerShell;
-            if !window_c.is_layer_window() {
-                return;
-            }
-        }
-        let (start_w, start_h) = start_size_c.get();
+        let (start_w, start_h) = start_size.get();
         let new_w = (start_w + offset_x as i32).max(300);
         let new_h = (start_h + offset_y as i32).max(250);
         window_c.set_default_size(new_w, new_h);
     });
 
-    // Drag end: save size to state (layer-shell only, WM handles fallback)
     let window_c = window.clone();
     drag.connect_drag_end(move |_, _, _| {
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::LayerShell;
-            if !window_c.is_layer_window() {
-                return;
-            }
-        }
         let (w, h) = (window_c.width(), window_c.height());
         let mut st = state.borrow_mut();
         st.settings.window_width = w;

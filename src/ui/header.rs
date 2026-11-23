@@ -8,18 +8,21 @@
 
 use crate::core::state::AppState;
 use adw::prelude::*;
-use gtk4::gdk;
 use gtk4::gio;
 use gtk4::{ApplicationWindow, Box as GtkBox, GestureDrag, Label, MenuButton, Orientation};
 use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// Build header bar: section menu, current section, chat actions, hide
+/// Build header bar: section menu, current section, chat actions, window buttons.
+///
+/// The overlay moves itself and has collapse and hide. A normal window is
+/// the titlebar: the window manager moves it and GTK draws the window buttons.
 pub fn build(
     window: &ApplicationWindow,
     stack: &adw::ViewStack,
     state: Rc<RefCell<AppState>>,
+    overlay: bool,
 ) -> GtkBox {
     let header = GtkBox::new(Orientation::Horizontal, 2);
     header.add_css_class("shaya-header");
@@ -49,15 +52,17 @@ pub fn build(
     sync_section(stack);
     stack.connect_visible_child_name_notify(sync_section);
 
-    let collapse = gtk4::Button::from_icon_name("view-restore-symbolic");
-    collapse.add_css_class("flat");
-    collapse.set_tooltip_text(Some("Collapse to Shaya orb"));
-    collapse.set_action_name(Some("orbit.collapse"));
-    header.append(&collapse);
-    header.append(&build_hide_button());
-
-    // Setup drag gesture for window movement
-    setup_drag_gesture(&header, window, state);
+    if overlay {
+        let collapse = gtk4::Button::from_icon_name("view-restore-symbolic");
+        collapse.add_css_class("flat");
+        collapse.set_tooltip_text(Some("Collapse to Shaya orb"));
+        collapse.set_action_name(Some("orbit.collapse"));
+        header.append(&collapse);
+        header.append(&build_hide_button());
+        setup_drag_gesture(&header, window, state);
+    } else {
+        header.append(&gtk4::WindowControls::new(gtk4::PackType::End));
+    }
 
     header
 }
@@ -127,88 +132,42 @@ fn build_hide_button() -> gtk4::Button {
     hide_btn
 }
 
-/// Setup drag gesture for window movement (layer-shell)
+/// Drag to move the overlay. Layer-shell places it by its margins.
 pub(super) fn setup_drag_gesture(
     widget: &impl IsA<gtk4::Widget>,
     window: &ApplicationWindow,
     state: Rc<RefCell<AppState>>,
 ) {
-    let window_pos: Rc<Cell<(i32, i32)>> = Rc::new(Cell::new((0, 0)));
+    #[cfg(target_os = "linux")]
+    {
+        use gtk4_layer_shell::{Edge, LayerShell};
 
-    let drag = GestureDrag::new();
+        let start = Rc::new(Cell::new((0, 0)));
+        let drag = GestureDrag::new();
 
-    // Drag begin: capture current margins
-    let window_c = window.clone();
-    let window_pos_c = window_pos.clone();
-    drag.connect_drag_begin(move |_, _, _| {
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::{Edge, LayerShell};
-            if window_c.is_layer_window() {
-                window_pos_c.set((window_c.margin(Edge::Left), window_c.margin(Edge::Top)));
+        let (window_c, start_c) = (window.clone(), start.clone());
+        drag.connect_drag_begin(move |_, _, _| {
+            start_c.set((window_c.margin(Edge::Left), window_c.margin(Edge::Top)));
+        });
+
+        let window_c = window.clone();
+        drag.connect_drag_update(move |_, offset_x, offset_y| {
+            let (x, y) = start.get();
+            super::layer_shell::place(&window_c, x + offset_x as i32, y + offset_y as i32);
+        });
+
+        let window_c = window.clone();
+        drag.connect_drag_end(move |_, _, _| {
+            let mut st = state.borrow_mut();
+            st.settings.window_x = window_c.margin(Edge::Left);
+            st.settings.window_y = window_c.margin(Edge::Top);
+            if let Err(e) = st.save() {
+                tracing::warn!("Failed to save window position: {}", e);
             }
-        }
-    });
+        });
 
-    // Drag update: apply offset (layer-shell) or delegate to WM on first update (fallback)
-    let window_c = window.clone();
-    let window_pos_c = window_pos.clone();
-    let wm_move_started = Rc::new(Cell::new(false));
-    let wm_move_started_c = wm_move_started.clone();
-    drag.connect_drag_update(move |gesture, offset_x, offset_y| {
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::LayerShell;
-            if window_c.is_layer_window() {
-                let (start_x, start_y) = window_pos_c.get();
-                super::layer_shell::place(
-                    &window_c,
-                    start_x + offset_x as i32,
-                    start_y + offset_y as i32,
-                );
-                return;
-            }
-        }
-        // Fallback: delegate to WM once (GNOME, etc.)
-        if !wm_move_started_c.get() {
-            wm_move_started_c.set(true);
-            if let Some(surface) = window_c.surface() {
-                if let Some(toplevel) = surface.dynamic_cast_ref::<gdk::Toplevel>() {
-                    if let Some(device) = gesture.device() {
-                        let (start_x, start_y) = gesture.start_point().unwrap_or((0.0, 0.0));
-                        toplevel.begin_move(
-                            &device,
-                            gesture.current_button() as i32,
-                            start_x + offset_x,
-                            start_y + offset_y,
-                            gesture.current_event_time(),
-                        );
-                    }
-                }
-            }
-        }
-    });
-
-    // Drag end: reset WM flag + save position (layer-shell)
-    let wm_move_started_c = wm_move_started;
-    let window_c = window.clone();
-    drag.connect_drag_end(move |_, _, _| {
-        wm_move_started_c.set(false);
-        #[cfg(target_os = "linux")]
-        {
-            use gtk4_layer_shell::{Edge, LayerShell};
-            if window_c.is_layer_window() {
-                let x = window_c.margin(Edge::Left);
-                let y = window_c.margin(Edge::Top);
-                let mut st = state.borrow_mut();
-                st.settings.window_x = x;
-                st.settings.window_y = y;
-                if let Err(e) = st.save() {
-                    tracing::warn!("Failed to save window position: {}", e);
-                }
-            }
-        }
-    });
-
-    widget.add_controller(drag);
+        widget.add_controller(drag);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (widget, window, state);
 }
