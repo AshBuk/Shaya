@@ -27,7 +27,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 cd "$ROOT"
 # Same top directory as the GitHub tag tarball named in Source0
-git ls-files -co --exclude-standard -z |
+git ls-files -z |
     tar --null -T - --transform "s,^,Shaya-$VERSION/," -czf "$SOURCES/shaya-$VERSION.tar.gz"
 
 cargo vendor --locked "$TMP/vendor" >/dev/null

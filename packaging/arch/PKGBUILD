@@ -9,6 +9,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/AshBuk/Shaya"
 license=('Apache-2.0')
 depends=(
+    'cairo'
     'glib2'
     'glibc'
     'gtk4'
