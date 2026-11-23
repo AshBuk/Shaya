@@ -86,7 +86,7 @@ Shaya/
 │           ├── cheatsheets.rs  # Quick-access markdown notes
 │           └── meetings.rs     # Meeting recording and transcription
 ├── assets/
-│   └── shaya.desktop     # Desktop entry
+│   └── io.github.ashbuk.shaya.desktop  # Desktop entry
 ├── docker/
 │   ├── Dockerfile
 │   ├── docker-compose.yml

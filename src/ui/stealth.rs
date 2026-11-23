@@ -22,7 +22,7 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const APP_ID: &str = "com.shaya.stealth";
+const APP_ID: &str = "io.github.ashbuk.shaya";
 
 // Global references for SIGUSR1 handler
 thread_local! {

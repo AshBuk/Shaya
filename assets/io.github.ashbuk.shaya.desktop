@@ -11,14 +11,13 @@ Name=Shaya
 GenericName=AI Assistant
 Comment=Native AI assistant for Linux with desktop context and meeting tools
 Exec=shaya
-Icon=shaya
+Icon=io.github.ashbuk.shaya
 Terminal=false
 Categories=Utility;
 Keywords=ai;assistant;stealth;privacy;meeting;
 
 # Stealth mode: no startup notification
 StartupNotify=false
-StartupWMClass=com.shaya.stealth
 
 # STEALTH: No notification integration (visible in screen share)
 X-GNOME-UsesNotifications=false

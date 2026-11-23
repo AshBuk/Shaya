@@ -6,6 +6,7 @@
 
 # Install the binary only, the library target is internal to the crate
 %global cargo_install_lib 0
+%global app_id io.github.ashbuk.shaya
 
 Name:           shaya
 Version:        0.1.0
@@ -64,24 +65,24 @@ no Shaya server: requests go directly to the provider you choose.
 
 %install
 %cargo_install
-install -Dpm 0644 -t %{buildroot}%{_datadir}/applications assets/shaya.desktop
-install -Dpm 0644 -t %{buildroot}%{_metainfodir} assets/io.github.ashbuk.shaya.metainfo.xml
-install -Dpm 0644 -t %{buildroot}%{_datadir}/icons/hicolor/512x512/apps icons/shaya.png
-install -Dpm 0644 -t %{buildroot}%{_datadir}/icons/hicolor/scalable/apps icons/shaya.svg
+install -Dpm 0644 -t %{buildroot}%{_datadir}/applications assets/%{app_id}.desktop
+install -Dpm 0644 -t %{buildroot}%{_metainfodir} assets/%{app_id}.metainfo.xml
+install -Dpm 0644 icons/shaya.png %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/%{app_id}.png
+install -Dpm 0644 icons/shaya.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/shaya.desktop
-appstreamcli validate --no-net %{buildroot}%{_metainfodir}/io.github.ashbuk.shaya.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/%{app_id}.desktop
+appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xml
 %cargo_test
 
 %files
 %license LICENSE LICENSE.dependencies cargo-vendor.txt
 %doc README.md docs/OVERLAY_GUIDE.md
 %{_bindir}/shaya
-%{_datadir}/applications/shaya.desktop
-%{_metainfodir}/io.github.ashbuk.shaya.metainfo.xml
-%{_datadir}/icons/hicolor/512x512/apps/shaya.png
-%{_datadir}/icons/hicolor/scalable/apps/shaya.svg
+%{_datadir}/applications/%{app_id}.desktop
+%{_metainfodir}/%{app_id}.metainfo.xml
+%{_datadir}/icons/hicolor/512x512/apps/%{app_id}.png
+%{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %changelog
 * Mon Nov 09 2026 Asher Buk <AshBuk@users.noreply.github.com> - 0.1.0-1

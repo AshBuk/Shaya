@@ -56,9 +56,9 @@ check() {
 package() {
     cd "Shaya-$pkgver"
     install -Dm755 -t "$pkgdir/usr/bin" target/release/shaya
-    install -Dm644 -t "$pkgdir/usr/share/applications" assets/shaya.desktop
+    install -Dm644 -t "$pkgdir/usr/share/applications" assets/io.github.ashbuk.shaya.desktop
     install -Dm644 -t "$pkgdir/usr/share/metainfo" assets/io.github.ashbuk.shaya.metainfo.xml
-    install -Dm644 -t "$pkgdir/usr/share/icons/hicolor/512x512/apps" icons/shaya.png
-    install -Dm644 -t "$pkgdir/usr/share/icons/hicolor/scalable/apps" icons/shaya.svg
+    install -Dm644 icons/shaya.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/io.github.ashbuk.shaya.png"
+    install -Dm644 icons/shaya.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.ashbuk.shaya.svg"
     install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md docs/OVERLAY_GUIDE.md
 }
