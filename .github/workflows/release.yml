@@ -6,46 +6,210 @@
 
 name: Release
 
+# A release tag (v1.2.3) builds every package and publishes it once all of
+# them pass: the AppImage on the GitHub release, the RPM on COPR, the PKGBUILD
+# on AUR. A manual run, or a pull request that touches packaging, builds the
+# same packages and publishes nothing.
+
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packaging/**'
+      - 'assets/**'
+      - 'icons/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  version:
     name: Version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - run: packaging/check-version.sh "${GITHUB_REF_NAME#v}"
+      - id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          fi
+          packaging/check-version.sh "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  appimage:
+    name: AppImage
+    needs: version
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - run: packaging/appimage/build.sh
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appimage
+          path: dist/*
+          if-no-files-found: error
 
   fedora:
-    name: COPR
-    needs: check
+    name: Fedora
+    needs: version
     runs-on: ubuntu-latest
     container: fedora:44
+    timeout-minutes: 45
     steps:
-      - run: dnf install -y cargo cargo-rpm-macros copr-cli git-core glibc-langpack-en rpm-build rpmlint tar xz
+      # git goes first: without it checkout fetches a tarball with no .git for create-srpm.sh
+      - run: |
+          dnf install -y cargo cargo-rpm-macros dnf-plugins-core git-core glibc-langpack-en \
+            rpm-build rpmlint tar xz
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: actions/checkout@v4
-
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - run: rpmlint -r packaging/fedora/.rpmlintrc packaging/fedora/shaya.spec
 
       - run: packaging/fedora/create-srpm.sh
 
-      - uses: actions/upload-artifact@v4
+      # COPR builds the SRPM. Building it here as well catches a broken spec
+      # before anything is published.
+      - name: Build and lint the RPM
+        run: |
+          dnf builddep -y ~/rpmbuild/SRPMS/*.src.rpm
+          rpmbuild --rebuild ~/rpmbuild/SRPMS/*.src.rpm
+          rpmlint -r packaging/fedora/.rpmlintrc ~/rpmbuild/SRPMS/*.src.rpm ~/rpmbuild/RPMS/*/*.rpm
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: srpm
           path: ~/rpmbuild/SRPMS/*.src.rpm
+          if-no-files-found: error
 
-      - name: Submit to COPR
+  arch:
+    name: Arch
+    needs: version
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - run: pacman -Syu --noconfirm --needed base-devel git namcap
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A tag builds the tarball AUR users download, so its checksum goes into
+      # the published PKGBUILD. The repository has to be public for that.
+      # Other runs build the checked out tree.
+      - name: Source and checksum
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          mkdir build
+          cp packaging/arch/PKGBUILD build/
+          tarball="build/shaya-$VERSION.tar.gz"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            curl -fsSL -o "$tarball" \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/refs/tags/$GITHUB_REF_NAME.tar.gz"
+          else
+            git archive --prefix="Shaya-$VERSION/" -o "$tarball" HEAD
+          fi
+          sha="$(sha256sum "$tarball" | cut -d' ' -f1)"
+          sed -i "s/^sha256sums=.*/sha256sums=('$sha')/" build/PKGBUILD
+
+      - name: Build and lint
+        run: |
+          source build/PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
+          useradd -m builder
+          chown -R builder build
+          cd build
+          su builder -c "makepkg --noconfirm"
+          namcap PKGBUILD ./*.pkg.tar.zst
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pkgbuild
+          path: build/PKGBUILD
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    if: github.ref_type == 'tag'
+    needs: [appimage, fedora, arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: appimage
+          path: dist
+
+      - run: cd dist && sha256sum ./*.AppImage > SHA256SUMS
+
+      - name: Compose the release notes
+        id: notes
         env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # checkout turns the annotated tag into a lightweight one
+          # (actions/checkout#290): fetch the tag object to read its message
+          git fetch --force origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          header="$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")"
+          [ -n "$header" ] || header="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
+          # Generated here instead of generate_release_notes, so a rerun
+          # writes the same notes instead of appending to them
+          notes="$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$GITHUB_REF_NAME" -q .body)"
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            printf '%s\n\n%s\n' "$header" "$notes"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            dist/*.AppImage
+            dist/*.zsync
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+
+  copr:
+    name: COPR
+    if: github.ref_type == 'tag'
+    needs: [appimage, fedora, arch]
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - run: dnf install -y copr-cli
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: srpm
+          path: srpm
+
+      - env:
           COPR_LOGIN: ${{ secrets.COPR_LOGIN }}
           COPR_USERNAME: ${{ secrets.COPR_USERNAME }}
           COPR_API_TOKEN: ${{ secrets.COPR_API_TOKEN }}
@@ -59,41 +223,23 @@ jobs:
           username = ${COPR_USERNAME}
           token = ${COPR_API_TOKEN}
           EOF
-          copr-cli build shaya ~/rpmbuild/SRPMS/*.src.rpm
+          copr-cli build shaya srpm/*.src.rpm
 
-  arch:
+  aur:
     name: AUR
-    needs: check
+    if: github.ref_type == 'tag'
+    needs: [appimage, fedora, arch]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pkgbuild
+          path: aur
 
-      - name: Pin the source checksum
-        run: |
-          curl -fsSL -o source.tar.gz "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/refs/tags/$GITHUB_REF_NAME.tar.gz"
-          sha="$(sha256sum source.tar.gz | cut -d' ' -f1)"
-          sed -i "s/^sha256sums=.*/sha256sums=('$sha')/" packaging/arch/PKGBUILD
-
-      - name: Build and lint
-        run: |
-          mkdir build
-          cp packaging/arch/PKGBUILD build/
-          docker run --rm -v "$PWD/build:/build" archlinux:latest bash -euc '
-            pacman -Syu --noconfirm --needed base-devel namcap
-            source /build/PKGBUILD
-            pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}"
-            useradd -m builder
-            chown -R builder /build
-            cd /build
-            su builder -c "makepkg --noconfirm"
-            namcap PKGBUILD ./*.pkg.tar.zst
-          '
-
-      - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
+      - uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
         with:
           pkgname: shaya
-          pkgbuild: packaging/arch/PKGBUILD
+          pkgbuild: aur/PKGBUILD
           commit_username: ${{ secrets.AUR_USERNAME }}
           commit_email: ${{ secrets.AUR_EMAIL }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

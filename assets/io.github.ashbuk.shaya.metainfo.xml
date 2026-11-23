@@ -32,8 +32,8 @@
       <li>Show or hide with any shortcut set in your desktop or compositor</li>
     </ul>
   </description>
-  <launchable type="desktop-id">shaya.desktop</launchable>
-  <icon type="stock">shaya</icon>
+  <launchable type="desktop-id">io.github.ashbuk.shaya.desktop</launchable>
+  <icon type="stock">io.github.ashbuk.shaya</icon>
   <categories>
     <category>Utility</category>
   </categories>

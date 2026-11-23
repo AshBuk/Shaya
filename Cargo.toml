@@ -5,7 +5,6 @@ description = "Native AI assistant for Linux, built with Rust and GTK4."
 authors = ["Asher Buk"]
 license = "Apache-2.0"
 repository = "https://github.com/AshBuk/Shaya"
-homepage = "https://github.com/AshBuk/Shaya"
 edition = "2021"
 rust-version = "1.89"
 keywords = ["linux", "rust", "ai", "assistant", "privacy", "wayland", "gtk4"]
