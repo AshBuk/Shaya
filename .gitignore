@@ -10,6 +10,7 @@ target/
 *.pdb
 
 # Build artifacts
+dist/
 *.dmg
 *.app
 *.deb
