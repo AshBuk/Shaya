@@ -6,7 +6,7 @@
 
 //! Conversation display: one widget per message, with separate surfaces for code.
 
-use super::markdown::{self, Block};
+use super::markdown::{self, Block, MarkdownView};
 use crate::core::state::{AppState, ImageData, Message, Role};
 use base64::Engine;
 use gtk4::prelude::*;
@@ -148,7 +148,6 @@ impl Transcript {
 
     fn text_view(&self, text: &str) -> TextView {
         let buffer = TextBuffer::new(Some(&self.tags));
-        markdown::render(&buffer, text);
         let view = TextView::builder()
             .buffer(&buffer)
             .editable(false)
@@ -159,6 +158,7 @@ impl Transcript {
             .pixels_inside_wrap(3)
             .build();
         view.add_css_class("message-text");
+        MarkdownView::new(&view).render(text);
         view
     }
 }

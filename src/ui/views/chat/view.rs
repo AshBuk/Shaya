@@ -6,9 +6,9 @@
 
 //! Chat View UI construction
 //!
-//! Split into two parts for input passthrough:
-//! - `build_content` - read-only content (passthrough area)
-//! - `build_input` - interactive controls (control panel)
+//! Split into two parts:
+//! - `build_content` - transcript and status, a page of the view stack
+//! - `build_input` - composer and controls, in the panel below the stack
 
 use super::messaging::Attachment;
 use super::status::StatusBar;
@@ -96,7 +96,7 @@ impl EmptyState {
     }
 }
 
-/// Build read-only content area (passthrough - clicks pass through)
+/// Build the transcript area.
 /// Returns the widget and shared state needed by `build_input`.
 pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) {
     let vbox = GtkBox::new(Orientation::Vertical, 0);
@@ -115,20 +115,8 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     transcript_label.add_css_class("dim-label");
     transcript_label.set_visible(false);
 
-    let is_dark = state.borrow().settings.dark_mode;
-    let tag_table = markdown::create_tag_table(is_dark);
-
-    // Update code tag colors when theme changes at runtime
-    if let Some(display) = gdk::Display::default() {
-        let sm = adw::StyleManager::for_display(&display);
-        let tt = tag_table.clone();
-        sm.connect_dark_notify(move |sm| {
-            markdown::update_theme(&tt, sm.is_dark());
-        });
-    }
-
     let empty = EmptyState::new();
-    let transcript = Transcript::new(&empty.root, tag_table);
+    let transcript = Transcript::new(&empty.root, markdown::create_tag_table());
     vbox.append(transcript.widget());
 
     empty.refresh(&state.borrow().settings);
