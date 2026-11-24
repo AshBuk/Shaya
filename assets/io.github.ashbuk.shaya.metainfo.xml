@@ -34,6 +34,20 @@
       <li>Show or hide with any shortcut set in your desktop or compositor</li>
     </ul>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Chat about a screenshot of a Japanese web page with Claude Haiku</caption>
+      <image>https://raw.githubusercontent.com/AshBuk/Shaya/screenshots/chat.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Sections menu around the floating button</caption>
+      <image>https://raw.githubusercontent.com/AshBuk/Shaya/screenshots/sections.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A screenshot of code explained in the light theme</caption>
+      <image>https://raw.githubusercontent.com/AshBuk/Shaya/screenshots/code.png</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">io.github.ashbuk.shaya.desktop</launchable>
   <icon type="stock">io.github.ashbuk.shaya</icon>
   <categories>
