@@ -45,7 +45,7 @@ pub fn handle_audio_click(
         let audio_path = match recorder.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
-                status.error(&e.to_string());
+                status.error(&format!("{e:#}"));
                 return;
             }
         };
@@ -54,14 +54,14 @@ pub fn handle_audio_click(
     } else {
         // A new file per recording: the previous one may still be uploading.
         let started = utils::temp_path("voice", "wav")
-            .map_err(|e| e.to_string())
+            .map_err(Into::into)
             .and_then(|path| recorder.borrow_mut().start(path));
         match started {
             Ok(()) => {
                 audio_btn.add_css_class("recording");
                 status.start_activity("Recording microphone", audio_btn, false);
             }
-            Err(e) => status.error(&e),
+            Err(e) => status.error(&format!("{e:#}")),
         }
     }
 }
@@ -81,7 +81,7 @@ pub fn handle_listen_click(
         let audio_path = match listener.borrow_mut().stop() {
             Ok(path) => path,
             Err(e) => {
-                status.error(&e.to_string());
+                status.error(&format!("{e:#}"));
                 return;
             }
         };
@@ -95,14 +95,14 @@ pub fn handle_listen_click(
         );
     } else {
         let started = utils::temp_path("listen", "wav")
-            .map_err(|e| e.to_string())
+            .map_err(Into::into)
             .and_then(|path| listener.borrow_mut().start(path));
         match started {
             Ok(()) => {
                 listen_btn.add_css_class("recording");
                 status.start_activity("Capturing system audio", listen_btn, false);
             }
-            Err(e) => status.error(&e),
+            Err(e) => status.error(&format!("{e:#}")),
         }
     }
 }
@@ -166,7 +166,7 @@ fn transcribe_and_insert(
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            client.transcribe(&audio_path).map_err(|e| e.to_string())
+            client.transcribe(&audio_path)
         })
         .await;
 
@@ -186,7 +186,14 @@ fn transcribe_and_insert(
                 input.set_text(&new_text);
                 status.clear();
             }
-            Ok(Err(e)) => offer_retry(recording, &state, &status, &input, prefix, &e),
+            Ok(Err(e)) => offer_retry(
+                recording,
+                &state,
+                &status,
+                &input,
+                prefix,
+                &format!("{e:#}"),
+            ),
             Err(e) => offer_retry(
                 recording,
                 &state,

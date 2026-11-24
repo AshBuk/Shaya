@@ -10,6 +10,7 @@ use crate::core::audio::meet_recorder::{convert_meeting_to_opus, MeetingRecorder
 use crate::core::meeting::{self, MeetingManager, MeetingStatus};
 use crate::core::state::AppState;
 use adw::prelude::*;
+use anyhow::Context;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
@@ -116,11 +117,7 @@ fn build_controls(
 
         if is_recording {
             // Stop recording
-            let meeting = {
-                let mut rec = recorder_c.borrow_mut();
-                rec.as_mut().and_then(|r| r.stop().ok())
-            };
-            *recorder_c.borrow_mut() = None;
+            let stopped = recorder_c.borrow_mut().take().map(|mut r| r.stop());
 
             // Stop timer
             if let Some(id) = timer_id_c.borrow_mut().take() {
@@ -132,49 +129,46 @@ fn build_controls(
             btn.add_css_class("suggested-action");
             mic_c.set_sensitive(true);
 
-            if let Some(m) = meeting {
-                let saved = format!(
-                    "{} ({})",
-                    m.title,
-                    MeetingManager::format_duration(m.duration_secs)
-                );
-                status_c.set_text(&match &m.last_error {
-                    Some(problem) => format!("⚠️ Saved with problems: {saved}: {problem}"),
-                    None => format!("✅ Saved: {saved}"),
-                });
+            match stopped {
+                Some(Ok(m)) => {
+                    let saved = format!(
+                        "{} ({})",
+                        m.title,
+                        MeetingManager::format_duration(m.duration_secs)
+                    );
+                    status_c.set_text(&match &m.last_error {
+                        Some(problem) => format!("⚠️ Saved with problems: {saved}: {problem}"),
+                        None => format!("✅ Saved: {saved}"),
+                    });
 
-                // Create OPUS copies in background, the WAVs stay for transcription.
-                // Set Converting status to block Transcribe button during conversion
-                if let Ok(mut meta) = MeetingManager::load(&m.id) {
-                    meta.status = MeetingStatus::Converting;
-                    let _ = MeetingManager::save(&meta);
-                }
+                    // Create OPUS copies in background, the WAVs stay for transcription.
+                    // Set Converting status to block Transcribe button during conversion
+                    MeetingManager::update(&m.id, |meta| meta.status = MeetingStatus::Converting);
 
-                let meeting_id = m.id.clone();
-                let list_cc = list_c.clone();
-                let state_cc = state_c.clone();
-                glib::spawn_future_local(async move {
-                    let id = meeting_id.clone();
-                    let _ = gio::spawn_blocking(move || {
-                        if convert_meeting_to_opus(&id) {
-                            if let Ok(mut m) = MeetingManager::load(&id) {
-                                m.audio_format = "opus".to_string();
+                    let meeting_id = m.id.clone();
+                    let list_cc = list_c.clone();
+                    let state_cc = state_c.clone();
+                    glib::spawn_future_local(async move {
+                        let id = meeting_id.clone();
+                        let task = gio::spawn_blocking(move || {
+                            let converted = convert_meeting_to_opus(&id);
+                            // Without a converter the WAVs stay, and the meeting is complete anyway.
+                            MeetingManager::update(&id, |m| {
+                                if converted {
+                                    m.audio_format = "opus".to_string();
+                                }
                                 m.status = MeetingStatus::Completed;
-                                let _ = MeetingManager::save(&m);
-                            }
-                        } else {
-                            // No converter available — mark as Completed anyway
-                            if let Ok(mut m) = MeetingManager::load(&id) {
-                                m.status = MeetingStatus::Completed;
-                                let _ = MeetingManager::save(&m);
-                            }
+                            });
+                        })
+                        .await;
+                        if task.is_err() {
+                            tracing::error!("Conversion task failed for {meeting_id}");
                         }
-                    })
-                    .await;
-                    rebuild_list(&list_cc, &state_cc);
-                });
-            } else {
-                status_c.set_text("✅ Recording stopped");
+                        rebuild_list(&list_cc, &state_cc);
+                    });
+                }
+                Some(Err(e)) => status_c.set_text(&format!("❌ Recording not saved: {e:#}")),
+                None => status_c.set_text("✅ Recording stopped"),
             }
 
             rebuild_list(&list_c, &state_c);
@@ -211,7 +205,7 @@ fn build_controls(
                     *timer_id_c.borrow_mut() = Some(id);
                 }
                 Err(e) => {
-                    status_c.set_text(&format!("❌ {}", e));
+                    status_c.set_text(&format!("❌ {e:#}"));
                     status_c.set_visible(true);
                 }
             }
@@ -326,7 +320,7 @@ fn build_meeting_actions(
         play_btn.connect_clicked(move |_| {
             if let Some(path) = MeetingManager::find_playback_file(&meeting_id) {
                 if let Err(e) = open_with_system(&path) {
-                    tracing::error!("Failed to open audio: {}", e);
+                    tracing::error!("Failed to open audio: {e:#}");
                 }
             }
         });
@@ -425,11 +419,10 @@ fn build_transcription_controls(
                 return;
             }
 
-            if let Ok(mut m) = MeetingManager::load(&meeting_id) {
+            MeetingManager::update(&meeting_id, |m| {
                 m.status = MeetingStatus::Transcribing;
                 m.last_error = None;
-                let _ = MeetingManager::save(&m);
-            }
+            });
 
             let meeting_id_c = meeting_id.clone();
             let state_cc = state_c.clone();
@@ -439,13 +432,12 @@ fn build_transcription_controls(
                 let id = meeting_id_c.clone();
                 let result = gio::spawn_blocking(move || {
                     meeting::transcribe_meeting(&id, stt_provider, &stt_key, &stt_model)
-                        .map_err(|e| e.to_string())
                 })
                 .await;
 
                 let failure = match result {
                     Ok(Ok(_)) => None,
-                    Ok(Err(e)) => Some(e),
+                    Ok(Err(e)) => Some(format!("{e:#}")),
                     Err(e) => {
                         tracing::error!("Transcription task failed: {:?}", e);
                         Some("Transcription task failed".to_string())
@@ -453,11 +445,10 @@ fn build_transcription_controls(
                 };
                 if let Some(failure) = failure {
                     tracing::error!("Transcription failed for {}: {}", meeting_id_c, failure);
-                    if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
+                    MeetingManager::update(&meeting_id_c, |m| {
                         m.status = MeetingStatus::Completed;
                         m.last_error = Some(failure);
-                        let _ = MeetingManager::save(&m);
-                    }
+                    });
                 }
                 rebuild_list(&container_cc, &state_cc);
             });
@@ -493,26 +484,21 @@ fn build_transcription_controls(
 
             glib::spawn_future_local(async move {
                 let id = meeting_id_c.clone();
-                let result = gio::spawn_blocking(move || {
-                    meeting::analyze_meeting(&id, &route).map_err(|e| e.to_string())
-                })
-                .await;
+                let result =
+                    gio::spawn_blocking(move || meeting::analyze_meeting(&id, &route)).await;
 
                 let failure = match result {
                     Ok(Ok(_)) => None,
-                    Ok(Err(e)) => Some(e),
+                    Ok(Err(e)) => Some(format!("{e:#}")),
                     Err(e) => {
                         tracing::error!("Analysis task failed: {:?}", e);
                         Some("Analysis task failed".to_string())
                     }
                 };
-                if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
-                    if let Some(failure) = &failure {
-                        tracing::error!("Analysis failed: {}", failure);
-                    }
-                    m.last_error = failure;
-                    let _ = MeetingManager::save(&m);
+                if let Some(failure) = &failure {
+                    tracing::error!("Analysis failed for {}: {}", meeting_id_c, failure);
                 }
+                MeetingManager::update(&meeting_id_c, |m| m.last_error = failure);
 
                 rebuild_list(&container_cc, &state_cc);
             });
@@ -556,14 +542,14 @@ fn build_transcription_controls(
 }
 
 /// Open audio file with the system's default player
-fn open_with_system(path: &std::path::Path) -> Result<(), String> {
+fn open_with_system(path: &std::path::Path) -> anyhow::Result<()> {
     std::process::Command::new("xdg-open")
         .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("xdg-open failed: {}", e))?;
+        .context("xdg-open failed")?;
     Ok(())
 }
 

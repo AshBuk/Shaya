@@ -10,6 +10,7 @@
 use super::capture::AudioRecorder;
 use super::listen::ListenRecorder;
 use crate::core::meeting::{Meeting, MeetingManager, MeetingStatus};
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -25,10 +26,10 @@ pub struct MeetingRecorder {
 
 impl MeetingRecorder {
     /// Start a new meeting recording
-    pub fn start(record_mic: bool) -> Result<Self, String> {
+    pub fn start(record_mic: bool) -> Result<Self> {
         let mut meeting = Meeting::new(record_mic);
         let meeting_dir = MeetingManager::prepare_meeting_dir(&meeting.id)
-            .map_err(|e| format!("Failed to create meeting directory: {}", e))?;
+            .context("Failed to create meeting directory")?;
 
         // System audio recorder (monitor source)
         let mut system_recorder = ListenRecorder::new();
@@ -40,9 +41,9 @@ impl MeetingRecorder {
             match mic.start(meeting_dir.join("mic.wav")) {
                 Ok(()) => Some(mic),
                 Err(e) => {
-                    tracing::warn!("Failed to start mic recording: {}", e);
+                    tracing::warn!("Failed to start mic recording: {e:#}");
                     meeting.has_mic = false;
-                    meeting.last_error = Some(format!("Microphone not recorded: {}", e));
+                    meeting.last_error = Some(format!("Microphone not recorded: {e:#}"));
                     None
                 }
             }
@@ -51,8 +52,7 @@ impl MeetingRecorder {
         };
 
         // Save initial metadata
-        MeetingManager::save(&meeting)
-            .map_err(|e| format!("Failed to save meeting metadata: {}", e))?;
+        MeetingManager::save(&meeting).context("Failed to save meeting metadata")?;
 
         tracing::info!("Meeting started: {} (mic: {})", meeting.id, record_mic);
 
@@ -66,14 +66,14 @@ impl MeetingRecorder {
 
     /// Stop recording and finalize meeting.
     /// A capture failure is recorded on the meeting so the user sees it.
-    pub fn stop(&mut self) -> Result<Meeting, String> {
+    pub fn stop(&mut self) -> Result<Meeting> {
         let mut problems: Vec<String> = self.meeting.last_error.take().into_iter().collect();
         if let Err(e) = self.system_recorder.stop() {
-            problems.push(format!("System audio: {}", e));
+            problems.push(format!("System audio: {e:#}"));
         }
         if let Some(ref mut mic) = self.mic_recorder {
             if let Err(e) = mic.stop() {
-                problems.push(format!("Microphone: {}", e));
+                problems.push(format!("Microphone: {e:#}"));
             }
         }
 
@@ -82,8 +82,7 @@ impl MeetingRecorder {
         self.meeting.duration_secs = self.started_at.elapsed().as_secs();
         self.meeting.status = MeetingStatus::Completed;
 
-        MeetingManager::save(&self.meeting)
-            .map_err(|e| format!("Failed to save meeting: {}", e))?;
+        MeetingManager::save(&self.meeting).context("Failed to save meeting")?;
 
         tracing::info!(
             "Meeting stopped: {} ({}s)",
@@ -144,7 +143,7 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
     if system_wav.exists() && mic_wav.exists() {
         match run_ffmpeg_mix(&system_wav, &mic_wav, &mixed_wav) {
             Ok(()) => tracing::info!("Created mixed.wav from system + mic"),
-            Err(e) => tracing::warn!("Failed to create mixed.wav: {}", e),
+            Err(e) => tracing::warn!("Failed to create mixed.wav: {e:#}"),
         }
     }
 
@@ -172,7 +171,7 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
                 any_converted = true;
             }
             Err(e) => {
-                tracing::warn!("Failed to convert {} to OPUS: {}", name, e);
+                tracing::warn!("Failed to convert {name} to OPUS: {e:#}");
                 // Keep WAV file on failure
             }
         }
@@ -183,14 +182,11 @@ fn convert_wav_to_opus(dir: &Path) -> bool {
 
 /// Encode under a temporary name, so a file at `opus` is always complete:
 /// after transcription its presence allows deleting the source WAV.
-fn encode_atomically(
-    opus: &Path,
-    encode: impl FnOnce(&Path) -> Result<(), String>,
-) -> Result<(), String> {
+fn encode_atomically(opus: &Path, encode: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     let partial = opus.with_extension("partial.opus");
     let result = encode(&partial).and_then(|()| {
         std::fs::rename(&partial, opus)
-            .map_err(|e| format!("Failed to save {}: {}", opus.display(), e))
+            .with_context(|| format!("Failed to save {}", opus.display()))
     });
     if result.is_err() {
         let _ = std::fs::remove_file(&partial);
@@ -214,7 +210,7 @@ fn find_converter() -> Option<Converter> {
     }
 }
 
-fn run_opusenc(wav: &Path, opus: &Path) -> Result<(), String> {
+fn run_opusenc(wav: &Path, opus: &Path) -> Result<()> {
     let status = Command::new("opusenc")
         .args([
             "--bitrate",
@@ -227,16 +223,15 @@ fn run_opusenc(wav: &Path, opus: &Path) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("opusenc failed: {}", e))?;
+        .context("opusenc failed")?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("opusenc exited with {}", status))
+    if !status.success() {
+        bail!("opusenc exited with {status}");
     }
+    Ok(())
 }
 
-fn run_ffmpeg(wav: &Path, opus: &Path) -> Result<(), String> {
+fn run_ffmpeg(wav: &Path, opus: &Path) -> Result<()> {
     let status = Command::new("ffmpeg")
         .args([
             "-i",
@@ -254,18 +249,17 @@ fn run_ffmpeg(wav: &Path, opus: &Path) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("ffmpeg failed: {}", e))?;
+        .context("ffmpeg failed")?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("ffmpeg exited with {}", status))
+    if !status.success() {
+        bail!("ffmpeg exited with {status}");
     }
+    Ok(())
 }
 
-fn run_ffmpeg_mix(system_wav: &Path, mic_wav: &Path, mixed_wav: &Path) -> Result<(), String> {
+fn run_ffmpeg_mix(system_wav: &Path, mic_wav: &Path, mixed_wav: &Path) -> Result<()> {
     if !command_exists("ffmpeg") {
-        return Err("ffmpeg not found".to_string());
+        bail!("ffmpeg not found");
     }
 
     let status = Command::new("ffmpeg")
@@ -289,13 +283,12 @@ fn run_ffmpeg_mix(system_wav: &Path, mic_wav: &Path, mixed_wav: &Path) -> Result
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("ffmpeg mix failed: {}", e))?;
+        .context("ffmpeg mix failed")?;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("ffmpeg mix exited with {}", status))
+    if !status.success() {
+        bail!("ffmpeg mix exited with {status}");
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -310,7 +303,7 @@ mod tests {
 
         let result = encode_atomically(&opus, |partial| {
             fs::write(partial, "truncated").unwrap();
-            Err("encoder crashed".to_string())
+            Err(anyhow::anyhow!("encoder crashed"))
         });
 
         assert!(result.is_err());
@@ -324,7 +317,7 @@ mod tests {
 
         encode_atomically(&opus, |partial| {
             assert!(!opus.exists());
-            fs::write(partial, "audio").map_err(|e| e.to_string())
+            Ok(fs::write(partial, "audio")?)
         })
         .unwrap();
 

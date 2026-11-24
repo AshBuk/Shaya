@@ -17,6 +17,7 @@ use crate::core::live::{
 };
 use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
 use crate::core::utils;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use gtk4::gio;
 use gtk4::glib;
@@ -166,14 +167,14 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     let path = match utils::temp_path("live_chunk", "wav") {
         Ok(path) => path,
         Err(e) => {
-            ctx.status.error(&format!("Live setup failed: {}", e));
+            ctx.status.error(&format!("Live setup failed: {e:#}"));
             stop(ctx, runtime);
             return;
         }
     };
     let mut recorder = ListenRecorder::new();
     if let Err(e) = recorder.start(path) {
-        ctx.status.error(&format!("Live capture failed: {}", e));
+        ctx.status.error(&format!("Live capture failed: {e:#}"));
         stop(ctx, runtime);
         return;
     }
@@ -228,15 +229,15 @@ fn finish_chunk(
     match audio_path {
         Ok(path) => process_chunk(ctx, runtime, chunk, path, false),
         Err(e) => {
-            ctx.status.error(&format!("Live chunk skipped: {}", e));
+            ctx.status.error(&format!("Live chunk skipped: {e:#}"));
             complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, false);
         }
     }
 }
 
-fn stop_recorder(recorder: Option<ListenRecorder>) -> Result<PathBuf, String> {
+fn stop_recorder(recorder: Option<ListenRecorder>) -> anyhow::Result<PathBuf> {
     recorder
-        .ok_or_else(|| "no recorder".to_string())
+        .context("no recorder")
         .and_then(|mut recorder| recorder.stop())
 }
 
@@ -274,7 +275,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     match stopped {
         Ok(audio_path) => process_chunk(ctx, runtime, chunk, audio_path, true),
         Err(e) => {
-            ctx.status.error(&format!("Live flush skipped: {}", e));
+            ctx.status.error(&format!("Live flush skipped: {e:#}"));
             complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, true);
         }
     }
@@ -305,11 +306,11 @@ fn process_chunk(
             let vad_config = VadConfig::default();
             if analyze_audio_file(&audio_path, &vad_config).is_some_and(|vad| !vad.has_speech) {
                 let _ = fs::remove_file(&audio_path);
-                return Ok::<ChunkResult, String>(ChunkResult::Silent);
+                return anyhow::Ok(ChunkResult::Silent);
             }
 
             let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            let result = client.transcribe(&audio_path).map_err(|e| e.to_string());
+            let result = client.transcribe(&audio_path);
             let _ = fs::remove_file(&audio_path);
             let text = result?;
             if text.trim().is_empty() {
@@ -327,7 +328,7 @@ fn process_chunk(
         let result = match result {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => {
-                ctx.status.error(&format!("Live STT failed: {}", e));
+                ctx.status.error(&format!("Live STT failed: {e:#}"));
                 ChunkResult::Skipped
             }
             Err(e) => {
@@ -552,9 +553,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::for_route(&route);
-            client
-                .chat_with_options(&messages, &system_prompt, options)
-                .map_err(|e| e.to_string())
+            client.chat_with_options(&messages, &system_prompt, options)
         })
         .await;
 
@@ -568,7 +567,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
             }
             Ok(Err(e)) => {
                 clear_in_flight(&runtime, range);
-                ctx.status.error(&format!("Live LLM failed: {}", e));
+                ctx.status.error(&format!("Live LLM failed: {e:#}"));
             }
             Err(e) => {
                 clear_in_flight(&runtime, range);

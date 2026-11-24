@@ -9,6 +9,7 @@
 //! Records what the user hears (e.g., meeting audio, video calls).
 //! Uses PipeWire/PulseAudio monitor source for loopback capture.
 
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -45,9 +46,9 @@ impl ListenRecorder {
     }
 
     /// Start recording system audio into `output_path`
-    pub fn start(&mut self, output_path: PathBuf) -> Result<(), String> {
+    pub fn start(&mut self, output_path: PathBuf) -> Result<()> {
         if self.is_listening() {
-            return Err("Already listening".to_string());
+            bail!("Already listening");
         }
 
         self.output_path = output_path;
@@ -59,7 +60,7 @@ impl ListenRecorder {
         tracing::info!("Starting listen capture with {} {:?}", cmd, args);
 
         let child = crate::core::utils::spawn_recorder(cmd, &args)
-            .map_err(|e| format!("Failed to start listen capture: {}", e))?;
+            .context("Failed to start listen capture")?;
 
         self.process = Some(child);
         self.is_listening.store(true, Ordering::SeqCst);
@@ -68,9 +69,9 @@ impl ListenRecorder {
     }
 
     /// Stop listening and return the audio file path
-    pub fn stop(&mut self) -> Result<PathBuf, String> {
+    pub fn stop(&mut self) -> Result<PathBuf> {
         if !self.is_listening() {
-            return Err("Not listening".to_string());
+            bail!("Not listening");
         }
 
         if let Some(mut process) = self.process.take() {
@@ -93,12 +94,12 @@ impl ListenRecorder {
         self.is_listening.store(false, Ordering::SeqCst);
 
         if self.output_path.exists() {
-            let metadata = fs::metadata(&self.output_path)
-                .map_err(|e| format!("Failed to read listen recording: {}", e))?;
+            let metadata =
+                fs::metadata(&self.output_path).context("Failed to read listen recording")?;
 
             if metadata.len() < 100 {
                 let _ = fs::remove_file(&self.output_path);
-                return Err("Listen recording too short".to_string());
+                bail!("Listen recording too short");
             }
 
             tracing::info!(
@@ -109,12 +110,12 @@ impl ListenRecorder {
 
             Ok(self.output_path.clone())
         } else {
-            Err("Listen recording file not found".to_string())
+            bail!("Listen recording file not found")
         }
     }
 
     /// Build command for recording monitor source
-    fn build_record_command(&self) -> Result<(&'static str, Vec<String>), String> {
+    fn build_record_command(&self) -> Result<(&'static str, Vec<String>)> {
         let output = self.output_path.to_string_lossy().to_string();
 
         // Prefer parecord for monitor sources (better PulseAudio compatibility)
@@ -155,7 +156,7 @@ impl ListenRecorder {
             }
         }
 
-        Err("No monitor source found. Make sure audio is playing.".to_string())
+        bail!("No monitor source found. Make sure audio is playing.")
     }
 
     /// Find the default PipeWire sink, recorded through its monitor ports

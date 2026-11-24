@@ -135,7 +135,7 @@ fn capture_in_background(
     button: &MenuButton,
     attachment: &Attachment,
     status: &StatusBar,
-    capture: fn() -> Result<capture::Screenshot, String>,
+    capture: fn() -> anyhow::Result<capture::Screenshot>,
     log_prefix: &'static str,
 ) {
     button.set_sensitive(false);
@@ -146,11 +146,11 @@ fn capture_in_background(
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(capture)
             .await
-            .unwrap_or_else(|_| Err("Capture task failed".to_string()));
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Capture task failed")));
         button.set_sensitive(true);
         match result {
             Ok(screenshot) => apply_captured_image(&attachment, &status, screenshot, log_prefix),
-            Err(e) => status.error(&e),
+            Err(e) => status.error(&format!("{e:#}")),
         }
     });
 }
@@ -194,7 +194,7 @@ pub fn handle_screenshot_click(button: &MenuButton, attachment: &Attachment, sta
                     "Screenshot attached via portal",
                 ),
                 Ok(None) => status.clear(),
-                Err(e) => status.error(&e),
+                Err(e) => status.error(&format!("{e:#}")),
             }
         });
         return;
@@ -272,9 +272,7 @@ pub fn send_message(ctx: &ChatContext) {
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::for_route(&route);
-            client
-                .chat(&messages, &system_prompt)
-                .map_err(|e| e.to_string())
+            client.chat(&messages, &system_prompt)
         })
         .await;
 
@@ -296,7 +294,7 @@ pub fn send_message(ctx: &ChatContext) {
                 ctx_c.status.clear();
                 return;
             }
-            Ok(Err(e)) => e,
+            Ok(Err(e)) => format!("{e:#}"),
             Err(e) => {
                 tracing::error!("Task join error: {:?}", e);
                 "Request failed".to_string()
