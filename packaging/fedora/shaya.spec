@@ -86,5 +86,5 @@ appstreamcli validate --no-net %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xm
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %changelog
-* Mon Nov 09 2026 Asher Buk <AshBuk@users.noreply.github.com> - 0.1.0-1
-- Initial RPM package
+* Tue Nov 24 2026 Asher Buk <AshBuk@users.noreply.github.com> - 0.1.0-1
+- First release: AI chat overlay for Linux with cloud or local models
