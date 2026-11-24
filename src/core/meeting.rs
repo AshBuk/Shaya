@@ -154,6 +154,17 @@ impl MeetingManager {
         Ok(serde_json::from_str(&content)?)
     }
 
+    /// Load, change and save a meeting's metadata. A failure is logged.
+    pub fn update(meeting_id: &str, change: impl FnOnce(&mut Meeting)) {
+        let result = Self::load(meeting_id).and_then(|mut meeting| {
+            change(&mut meeting);
+            Self::save(&meeting)
+        });
+        if let Err(e) = result {
+            tracing::error!("Failed to update meeting {meeting_id}: {e:#}");
+        }
+    }
+
     /// List all meetings sorted by date (newest first)
     pub fn list() -> Vec<Meeting> {
         let base = Self::base_dir();
@@ -372,8 +383,8 @@ fn transcribe_parts(
                     segments
                 }
                 Err(e) => {
-                    tracing::warn!("Transcription error for {}: {}", part.path.display(), e);
-                    failures.push(e.to_string());
+                    tracing::warn!("Transcription error for {}: {e:#}", part.path.display());
+                    failures.push(format!("{e:#}"));
                     continue;
                 }
             },

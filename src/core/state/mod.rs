@@ -547,7 +547,9 @@ impl AppState {
 
     /// Add new prompt, returns its ID
     pub fn add_prompt(&mut self, name: String, content: String) -> String {
-        let id = format!("prompt-{}", chrono::Utc::now().timestamp_millis());
+        let id = unique_id(format!("prompt-{}", Utc::now().timestamp_millis()), |id| {
+            self.prompts.iter().any(|p| p.id == id)
+        });
         self.prompts.push(SystemPrompt {
             id: id.clone(),
             name,
@@ -568,7 +570,9 @@ impl AppState {
 
     /// Add new cheatsheet, returns its ID
     pub fn add_cheatsheet(&mut self, name: String, content: String) -> String {
-        let id = format!("cheat-{}", chrono::Utc::now().timestamp_millis());
+        let id = unique_id(format!("cheat-{}", Utc::now().timestamp_millis()), |id| {
+            self.cheatsheets.iter().any(|c| c.id == id)
+        });
         self.cheatsheets.push(Cheatsheet {
             id: id.clone(),
             name,
@@ -581,6 +585,32 @@ impl AppState {
     pub fn remove_cheatsheet(&mut self, id: &str) {
         self.cheatsheets.retain(|c| c.id != id);
     }
+
+    /// Add a conversation to history
+    pub fn add_conversation(&mut self, title: String, messages: Vec<Message>) {
+        let created_at = Utc::now();
+        let id = unique_id(created_at.timestamp_millis().to_string(), |id| {
+            self.history.iter().any(|c| c.id == id)
+        });
+        self.history.push(Conversation {
+            id,
+            title,
+            messages,
+            created_at,
+        });
+    }
+}
+
+/// `base`, or `base-2`, `base-3`… if `taken` already holds it: IDs come from the
+/// clock, and two made within one millisecond would collide.
+fn unique_id(base: String, taken: impl Fn(&str) -> bool) -> String {
+    let mut id = base.clone();
+    let mut n = 1;
+    while taken(&id) {
+        n += 1;
+        id = format!("{base}-{n}");
+    }
+    id
 }
 
 #[cfg(test)]
@@ -768,5 +798,26 @@ mod tests {
         state.replace_chat(Vec::new());
 
         assert_ne!(state.chat_generation, before);
+    }
+
+    #[test]
+    fn ids_made_in_one_millisecond_stay_unique() {
+        let mut state = AppState::default();
+        let ids: Vec<_> = (0..3)
+            .map(|_| state.add_prompt(String::new(), String::new()))
+            .collect();
+        (0..3).for_each(|_| state.add_conversation(String::new(), Vec::new()));
+
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+        assert_ne!(state.history[0].id, state.history[1].id);
+        assert_ne!(state.history[1].id, state.history[2].id);
+    }
+
+    #[test]
+    fn a_taken_id_gets_the_next_free_suffix() {
+        let taken = ["a", "a-2"];
+        assert_eq!(unique_id("a".to_string(), |id| taken.contains(&id)), "a-3");
+        assert_eq!(unique_id("b".to_string(), |id| taken.contains(&id)), "b");
     }
 }

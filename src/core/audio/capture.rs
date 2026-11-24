@@ -6,17 +6,16 @@
 
 //! Audio capture using system tools (pw-record/parecord)
 
+use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 /// Audio recorder using PipeWire or PulseAudio
 pub struct AudioRecorder {
     process: Option<Child>,
     output_path: PathBuf,
-    is_recording: Arc<AtomicBool>,
+    is_recording: bool,
 }
 
 impl AudioRecorder {
@@ -25,19 +24,19 @@ impl AudioRecorder {
         Self {
             process: None,
             output_path: PathBuf::new(),
-            is_recording: Arc::new(AtomicBool::new(false)),
+            is_recording: false,
         }
     }
 
     /// Check if recording is in progress
     pub fn is_recording(&self) -> bool {
-        self.is_recording.load(Ordering::SeqCst)
+        self.is_recording
     }
 
     /// Start recording audio into `output_path`
-    pub fn start(&mut self, output_path: PathBuf) -> Result<(), String> {
+    pub fn start(&mut self, output_path: PathBuf) -> Result<()> {
         if self.is_recording() {
-            return Err("Already recording".to_string());
+            bail!("Already recording");
         }
 
         self.output_path = output_path;
@@ -66,24 +65,24 @@ impl AudioRecorder {
                 ],
             )
         } else {
-            return Err("No audio recorder found. Install pipewire or pulseaudio".to_string());
+            bail!("No audio recorder found. Install pipewire or pulseaudio");
         };
 
         tracing::info!("Starting audio capture with {}", cmd);
 
         let child = crate::core::utils::spawn_recorder(cmd, &args)
-            .map_err(|e| format!("Failed to start {}: {}", cmd, e))?;
+            .with_context(|| format!("Failed to start {cmd}"))?;
 
         self.process = Some(child);
-        self.is_recording.store(true, Ordering::SeqCst);
+        self.is_recording = true;
 
         Ok(())
     }
 
     /// Stop recording and return the audio file path
-    pub fn stop(&mut self) -> Result<PathBuf, String> {
+    pub fn stop(&mut self) -> Result<PathBuf> {
         if !self.is_recording() {
-            return Err("Not recording".to_string());
+            bail!("Not recording");
         }
 
         if let Some(mut process) = self.process.take() {
@@ -99,16 +98,15 @@ impl AudioRecorder {
             let _ = process.wait();
         }
 
-        self.is_recording.store(false, Ordering::SeqCst);
+        self.is_recording = false;
 
         // Verify file exists
         if self.output_path.exists() {
-            let metadata = fs::metadata(&self.output_path)
-                .map_err(|e| format!("Failed to read recording: {}", e))?;
+            let metadata = fs::metadata(&self.output_path).context("Failed to read recording")?;
 
             if metadata.len() < 100 {
                 let _ = fs::remove_file(&self.output_path);
-                return Err("Recording too short".to_string());
+                bail!("Recording too short");
             }
 
             tracing::info!(
@@ -119,7 +117,7 @@ impl AudioRecorder {
 
             Ok(self.output_path.clone())
         } else {
-            Err("Recording file not found".to_string())
+            bail!("Recording file not found")
         }
     }
 }

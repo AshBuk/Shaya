@@ -11,6 +11,7 @@
 //! - Sway: Shaya WILL appear in screenshots (no layer filtering support)
 //! - Selection UI (slurp overlay): whether a screen share shows it depends on the compositor
 
+use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use gtk4::gio;
 use gtk4::glib;
@@ -21,7 +22,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 type PortalResponse = (u32, std::collections::HashMap<String, glib::Variant>);
-type SharedPortalResult = std::rc::Rc<std::cell::RefCell<Option<Result<PortalResponse, String>>>>;
+type SharedPortalResult = std::rc::Rc<std::cell::RefCell<Option<Result<PortalResponse>>>>;
 
 /// Screenshot result with base64 encoded image
 #[derive(Clone)]
@@ -33,12 +34,11 @@ pub struct Screenshot {
 /// Capture user-selected area (sync path).
 /// Wayland wlroots: slurp + grim. KDE: spectacle -r. X11: gnome-screenshot -a.
 /// GNOME Wayland uses the async XDG portal instead — see `take_screenshot_async`.
-pub fn capture_area() -> Result<Screenshot, String> {
+pub fn capture_area() -> Result<Screenshot> {
     if requires_async_portal() {
-        return Err(
+        bail!(
             "GNOME Wayland area capture requires the async XDG Desktop Portal; \
              use take_screenshot_async() from the UI main loop."
-                .to_string(),
         );
     }
 
@@ -53,21 +53,19 @@ pub fn capture_area() -> Result<Screenshot, String> {
     } else if has_command("gnome-screenshot") {
         capture_area_gnome(&output_path)?;
     } else {
-        return Err(
+        bail!(
             "No area capture tool. Install: slurp+grim (wlroots), spectacle (KDE), or gnome-screenshot"
-                .to_string(),
         );
     }
     read_and_encode(&output_path)
 }
 
-fn screenshot_path() -> Result<PathBuf, String> {
-    crate::core::utils::temp_path("screenshot", "png")
-        .map_err(|e| format!("Failed to prepare screenshot file: {}", e))
+fn screenshot_path() -> Result<PathBuf> {
+    crate::core::utils::temp_path("screenshot", "png").context("Failed to prepare screenshot file")
 }
 
 /// Take a screenshot of the entire screen
-pub fn take_screenshot() -> Result<Screenshot, String> {
+pub fn take_screenshot() -> Result<Screenshot> {
     let output_path = screenshot_path()?;
 
     tracing::info!("Taking full screenshot");
@@ -88,7 +86,7 @@ pub fn requires_async_portal() -> bool {
 
 /// Async screenshot path for GNOME Wayland via XDG Desktop Portal.
 /// Returns `None` when the user cancels or denies the portal dialog.
-pub async fn take_screenshot_async() -> Result<Option<Screenshot>, String> {
+pub async fn take_screenshot_async() -> Result<Option<Screenshot>> {
     if !requires_async_portal() {
         return take_screenshot().map(Some);
     }
@@ -103,17 +101,17 @@ pub async fn take_screenshot_async() -> Result<Option<Screenshot>, String> {
 }
 
 /// Read screenshot file and encode to base64
-fn read_and_encode(path: &Path) -> Result<Screenshot, String> {
+fn read_and_encode(path: &Path) -> Result<Screenshot> {
     if !path.exists() {
-        return Err("Screenshot file not created".to_string());
+        bail!("Screenshot file not created");
     }
 
     let image_data = fs::read(path);
     let _ = fs::remove_file(path);
-    let image_data = image_data.map_err(|e| format!("Failed to read screenshot: {}", e))?;
+    let image_data = image_data.context("Failed to read screenshot")?;
 
     if image_data.len() < 100 {
-        return Err("Screenshot too small or cancelled".to_string());
+        bail!("Screenshot too small or cancelled");
     }
 
     tracing::info!("Screenshot captured: {} bytes", image_data.len());
@@ -125,16 +123,16 @@ fn read_and_encode(path: &Path) -> Result<Screenshot, String> {
 }
 
 /// Capture area using slurp + grim (wlroots compositors)
-fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
+fn capture_area_slurp_grim(output: &Path) -> Result<()> {
     // Run slurp to get geometry
     let slurp_output = Command::new("slurp")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| format!("Failed to run slurp: {}", e))?;
+        .context("Failed to run slurp")?;
 
     if !slurp_output.status.success() {
-        return Err("Area selection cancelled".to_string());
+        bail!("Area selection cancelled");
     }
 
     let geometry = String::from_utf8_lossy(&slurp_output.stdout)
@@ -142,7 +140,7 @@ fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
         .to_string();
 
     if geometry.is_empty() {
-        return Err("No area selected".to_string());
+        bail!("No area selected");
     }
     tracing::info!("Selected area: {}", geometry);
 
@@ -153,31 +151,31 @@ fn capture_area_slurp_grim(output: &Path) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .status()
-        .map_err(|e| format!("Failed to run grim: {}", e))?;
+        .context("Failed to run grim")?;
 
     if !status.success() {
-        return Err("grim capture failed".to_string());
+        bail!("grim capture failed");
     }
     Ok(())
 }
 
 /// Capture area using spectacle -r (KDE Plasma, Wayland and X11).
-fn capture_area_spectacle(output: &Path) -> Result<(), String> {
+fn capture_area_spectacle(output: &Path) -> Result<()> {
     let status = Command::new("spectacle")
         .args(["-r", "-b", "-n", "-o", output.to_string_lossy().as_ref()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("Failed to run spectacle: {}", e))?;
+        .context("Failed to run spectacle")?;
 
     if !status.success() {
-        return Err("Area selection cancelled".to_string());
+        bail!("Area selection cancelled");
     }
     if output.exists() {
         Ok(())
     } else {
-        Err("spectacle succeeded but file was not created".to_string())
+        Err(anyhow!("spectacle succeeded but file was not created"))
     }
 }
 
@@ -185,23 +183,25 @@ fn capture_area_spectacle(output: &Path) -> Result<(), String> {
 ///
 /// On GNOME Wayland, the XDG Desktop Portal async path is used instead
 /// (see `take_screenshot_async`), so this function targets X11 only.
-fn capture_area_gnome(output: &Path) -> Result<(), String> {
+fn capture_area_gnome(output: &Path) -> Result<()> {
     let status = Command::new("gnome-screenshot")
         .args(["-a", "-f", output.to_string_lossy().as_ref()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|e| format!("Failed to run gnome-screenshot: {}", e))?;
+        .context("Failed to run gnome-screenshot")?;
 
     if !status.success() {
-        return Err("Area selection cancelled".to_string());
+        bail!("Area selection cancelled");
     }
 
     if output.exists() {
         Ok(())
     } else {
-        Err("gnome-screenshot succeeded but file was not created".to_string())
+        Err(anyhow!(
+            "gnome-screenshot succeeded but file was not created"
+        ))
     }
 }
 
@@ -220,12 +220,11 @@ fn has_command(cmd: &str) -> bool {
     crate::core::utils::command_exists(cmd)
 }
 
-fn take_wayland_screenshot(output: &Path) -> Result<(), String> {
+fn take_wayland_screenshot(output: &Path) -> Result<()> {
     if is_gnome() {
-        return Err(
+        bail!(
             "GNOME Wayland screenshots require the async XDG Desktop Portal; \
              use take_screenshot_async() from the UI main loop."
-                .to_string(),
         );
     }
 
@@ -243,12 +242,14 @@ fn take_wayland_screenshot(output: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    Err("No screenshot tool found. Install: grim (Sway/Hyprland) or spectacle (KDE)".to_string())
+    Err(anyhow!(
+        "No screenshot tool found. Install: grim (Sway/Hyprland) or spectacle (KDE)"
+    ))
 }
 
 /// Full screenshot on GNOME Wayland via XDG Desktop Portal.
 /// Returns `Ok(true)` on success, `Ok(false)` when user cancelled/denied.
-async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, String> {
+async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool> {
     let proxy = gio::DBusProxy::for_bus_future(
         gio::BusType::Session,
         gio::DBusProxyFlags::NONE,
@@ -258,7 +259,7 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
         "org.freedesktop.portal.Screenshot",
     )
     .await
-    .map_err(|e| format!("Portal unavailable: {}", e))?;
+    .context("Portal unavailable")?;
 
     let mut opts: std::collections::HashMap<String, glib::Variant> =
         std::collections::HashMap::new();
@@ -280,11 +281,11 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
     let reply = proxy
         .call_future("Screenshot", Some(&params), gio::DBusCallFlags::NONE, -1)
         .await
-        .map_err(|e| format!("Portal screenshot request failed: {}", e))?;
+        .context("Portal screenshot request failed")?;
 
     let (handle_path,) = reply
         .get::<(String,)>()
-        .ok_or_else(|| "Portal returned invalid request handle".to_string())?;
+        .context("Portal returned invalid request handle")?;
     // A portal that ignores handle_token picks its own path.
     if handle_path != expected_path {
         request = PortalRequest::subscribe(&connection, &handle_path);
@@ -296,26 +297,22 @@ async fn take_gnome_wayland_screenshot_portal(output: &Path) -> Result<bool, Str
     if response_code != 0 {
         return match response_code {
             1 | 2 => Ok(false),
-            _ => Err(format!("Portal screenshot failed (code {})", response_code)),
+            _ => Err(anyhow!("Portal screenshot failed (code {response_code})")),
         };
     }
 
     let uri = response_data
         .get("uri")
         .and_then(|v| v.get::<String>())
-        .ok_or_else(|| "Portal response did not include screenshot URI".to_string())?;
+        .context("Portal response did not include screenshot URI")?;
 
     let source_path = gio::File::for_uri(&uri)
         .path()
-        .ok_or_else(|| "Portal returned non-local screenshot URI".to_string())?;
+        .context("Portal returned non-local screenshot URI")?;
 
     fs::rename(&source_path, output)
-        .or_else(|_| {
-            fs::copy(&source_path, output).map(|_| ()).map_err(|e| {
-                std::io::Error::new(e.kind(), format!("Failed to copy screenshot: {}", e))
-            })
-        })
-        .map_err(|e| format!("Failed to move portal screenshot: {}", e))?;
+        .or_else(|_| fs::copy(&source_path, output).map(drop))
+        .context("Failed to move portal screenshot")?;
 
     let _ = fs::remove_file(source_path);
     Ok(true)
@@ -351,7 +348,7 @@ impl PortalRequest {
                 let parsed = signal
                     .parameters
                     .get::<PortalResponse>()
-                    .ok_or_else(|| "Portal response payload has unexpected format".to_string());
+                    .context("Portal response payload has unexpected format");
                 *result_c.borrow_mut() = Some(parsed);
             },
         );
@@ -361,21 +358,21 @@ impl PortalRequest {
         }
     }
 
-    async fn wait(self, timeout: Duration) -> Result<PortalResponse, String> {
+    async fn wait(self, timeout: Duration) -> Result<PortalResponse> {
         let started = Instant::now();
         loop {
             if let Some(done) = self.result.borrow_mut().take() {
                 return done;
             }
             if started.elapsed() >= timeout {
-                return Err("Portal screenshot timed out".to_string());
+                bail!("Portal screenshot timed out");
             }
             glib::timeout_future(Duration::from_millis(50)).await;
         }
     }
 }
 
-fn take_x11_screenshot(output: &Path) -> Result<(), String> {
+fn take_x11_screenshot(output: &Path) -> Result<()> {
     // gnome-screenshot
     if try_capture_to_file(
         "gnome-screenshot",
@@ -396,7 +393,9 @@ fn take_x11_screenshot(output: &Path) -> Result<(), String> {
     ) {
         return Ok(());
     }
-    Err("No screenshot tool found. Install: gnome-screenshot, scrot, or spectacle".to_string())
+    Err(anyhow!(
+        "No screenshot tool found. Install: gnome-screenshot, scrot, or spectacle"
+    ))
 }
 
 /// Run a command and verify the output file was actually created.

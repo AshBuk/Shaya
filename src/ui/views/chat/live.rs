@@ -8,6 +8,7 @@
 
 use super::messaging::Attachment;
 use super::status::StatusBar;
+use super::task::ChatScope;
 use super::transcript::Transcript;
 use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
@@ -17,6 +18,7 @@ use crate::core::live::{
 };
 use crate::core::state::{AiProvider, AppState, ImageData, Message, Role};
 use crate::core::utils;
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use gtk4::gio;
 use gtk4::glib;
@@ -53,6 +55,7 @@ pub(super) struct LiveRuntime {
     /// Answer now waits for its chunk; a second press must not start another.
     force_pending: bool,
     next_seq: u64,
+    /// Grows with every start, so callbacks left from an earlier run do nothing.
     run_id: u64,
 }
 
@@ -121,7 +124,7 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         live.results = ChunkQueue::new(1);
         live.force_pending = false;
         live.next_seq = 1;
-        live.run_id = Utc::now().timestamp_micros() as u64;
+        live.run_id += 1;
     }
 
     set_live_buttons(&ctx, true);
@@ -166,14 +169,14 @@ fn start_next_chunk(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     let path = match utils::temp_path("live_chunk", "wav") {
         Ok(path) => path,
         Err(e) => {
-            ctx.status.error(&format!("Live setup failed: {}", e));
+            ctx.status.error(&format!("Live setup failed: {e:#}"));
             stop(ctx, runtime);
             return;
         }
     };
     let mut recorder = ListenRecorder::new();
     if let Err(e) = recorder.start(path) {
-        ctx.status.error(&format!("Live capture failed: {}", e));
+        ctx.status.error(&format!("Live capture failed: {e:#}"));
         stop(ctx, runtime);
         return;
     }
@@ -228,15 +231,15 @@ fn finish_chunk(
     match audio_path {
         Ok(path) => process_chunk(ctx, runtime, chunk, path, false),
         Err(e) => {
-            ctx.status.error(&format!("Live chunk skipped: {}", e));
+            ctx.status.error(&format!("Live chunk skipped: {e:#}"));
             complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, false);
         }
     }
 }
 
-fn stop_recorder(recorder: Option<ListenRecorder>) -> Result<PathBuf, String> {
+fn stop_recorder(recorder: Option<ListenRecorder>) -> anyhow::Result<PathBuf> {
     recorder
-        .ok_or_else(|| "no recorder".to_string())
+        .context("no recorder")
         .and_then(|mut recorder| recorder.stop())
 }
 
@@ -274,7 +277,7 @@ fn force_flush_and_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
     match stopped {
         Ok(audio_path) => process_chunk(ctx, runtime, chunk, audio_path, true),
         Err(e) => {
-            ctx.status.error(&format!("Live flush skipped: {}", e));
+            ctx.status.error(&format!("Live flush skipped: {e:#}"));
             complete_chunk(ctx, runtime, chunk, ChunkResult::Skipped, true);
         }
     }
@@ -305,11 +308,11 @@ fn process_chunk(
             let vad_config = VadConfig::default();
             if analyze_audio_file(&audio_path, &vad_config).is_some_and(|vad| !vad.has_speech) {
                 let _ = fs::remove_file(&audio_path);
-                return Ok::<ChunkResult, String>(ChunkResult::Silent);
+                return anyhow::Ok(ChunkResult::Silent);
             }
 
             let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            let result = client.transcribe(&audio_path).map_err(|e| e.to_string());
+            let result = client.transcribe(&audio_path);
             let _ = fs::remove_file(&audio_path);
             let text = result?;
             if text.trim().is_empty() {
@@ -327,7 +330,7 @@ fn process_chunk(
         let result = match result {
             Ok(Ok(result)) => result,
             Ok(Err(e)) => {
-                ctx.status.error(&format!("Live STT failed: {}", e));
+                ctx.status.error(&format!("Live STT failed: {e:#}"));
                 ChunkResult::Skipped
             }
             Err(e) => {
@@ -505,7 +508,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         (live.run_id, range, transcript_text)
     };
 
-    let (route, system_prompt, mut messages, cache_up_to_message, generation) = {
+    let (route, system_prompt, mut messages, cache_up_to_message, scope) = {
         let state = ctx.state.borrow();
         // Only images that reach the request choose the model. The image model applies
         // to a text-only main model, so the main provider's context decides.
@@ -523,7 +526,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
             live_system_prompt(&state),
             messages,
             cache_up_to_message,
-            state.chat_generation,
+            ChatScope::current(&state),
         )
     };
 
@@ -552,9 +555,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
     glib::spawn_future_local(async move {
         let result = gio::spawn_blocking(move || {
             let client = LlmClient::for_route(&route);
-            client
-                .chat_with_options(&messages, &system_prompt, options)
-                .map_err(|e| e.to_string())
+            client.chat_with_options(&messages, &system_prompt, options)
         })
         .await;
 
@@ -564,11 +565,11 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
 
         match result {
             Ok(Ok(response)) => {
-                apply_live_response(ctx, runtime, range, pending_message, response, generation)
+                apply_live_response(ctx, runtime, range, pending_message, response, scope)
             }
             Ok(Err(e)) => {
                 clear_in_flight(&runtime, range);
-                ctx.status.error(&format!("Live LLM failed: {}", e));
+                ctx.status.error(&format!("Live LLM failed: {e:#}"));
             }
             Err(e) => {
                 clear_in_flight(&runtime, range);
@@ -584,7 +585,7 @@ fn apply_live_response(
     range: LiveRequestRange,
     pending_message: Message,
     response: String,
-    generation: u64,
+    scope: ChatScope,
 ) {
     let mut reschedule = false;
     {
@@ -598,7 +599,7 @@ fn apply_live_response(
         } else if is_no_suggestion(&response) {
             session.mark_evaluated(range);
             ctx.status.activity("Live · no suggestion");
-        } else if ctx.state.borrow().chat_generation != generation {
+        } else if !scope.is_open(&ctx.state.borrow()) {
             // The chat this answer belongs to was cleared or replaced.
             session.mark_evaluated(range);
             ctx.status.activity("Live · listening");

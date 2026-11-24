@@ -10,6 +10,7 @@ use crate::core::audio::meet_recorder::{convert_meeting_to_opus, MeetingRecorder
 use crate::core::meeting::{self, MeetingManager, MeetingStatus};
 use crate::core::state::AppState;
 use adw::prelude::*;
+use anyhow::Context;
 use gtk4::gio;
 use gtk4::glib;
 use gtk4::{
@@ -18,7 +19,70 @@ use gtk4::{
 use libadwaita as adw;
 use libadwaita::prelude::MessageDialogExt;
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::rc::Rc;
+
+/// A paid request running for a meeting.
+#[derive(Clone, Copy)]
+enum Operation {
+    Transcription,
+    Analysis,
+}
+
+impl Operation {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Transcription => "Transcription",
+            Self::Analysis => "Analysis",
+        }
+    }
+}
+
+/// Operations in progress by meeting ID. Rows are rebuilt from files on every
+/// refresh, so this outlives them and decides what their buttons offer.
+#[derive(Clone, Default)]
+struct Operations(Rc<RefCell<HashMap<String, Operation>>>);
+
+impl Operations {
+    fn running(&self, meeting_id: &str) -> Option<Operation> {
+        self.0.borrow().get(meeting_id).copied()
+    }
+
+    /// Claim the meeting for `operation`, or `None` while another one runs on it.
+    fn start(&self, meeting_id: &str, operation: Operation) -> Option<Running> {
+        match self.0.borrow_mut().entry(meeting_id.to_string()) {
+            Entry::Occupied(_) => return None,
+            Entry::Vacant(slot) => slot.insert(operation),
+        };
+        Some(Running {
+            operations: self.clone(),
+            meeting_id: meeting_id.to_string(),
+            operation,
+        })
+    }
+}
+
+/// A claimed meeting, released on drop.
+struct Running {
+    operations: Operations,
+    meeting_id: String,
+    operation: Operation,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.operations.0.borrow_mut().remove(&self.meeting_id);
+    }
+}
+
+/// The meeting list with what its rows need to act.
+#[derive(Clone)]
+struct MeetingList {
+    container: GtkBox,
+    state: Rc<RefCell<AppState>>,
+    operations: Operations,
+}
 
 /// Build the meetings view
 pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
@@ -27,24 +91,25 @@ pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
 
     MeetingManager::prepare_storage();
 
-    // Shared references for clean refresh
     let recorder: Rc<RefCell<Option<MeetingRecorder>>> = Rc::new(RefCell::new(None));
-    let list_container = Rc::new(GtkBox::new(Orientation::Vertical, 0));
-    list_container.set_vexpand(true);
+    let list = MeetingList {
+        container: GtkBox::new(Orientation::Vertical, 0),
+        state,
+        operations: Operations::default(),
+    };
+    list.container.set_vexpand(true);
 
-    // Recording controls (pass list_container for reliable refresh)
-    let controls = build_controls(&state, &recorder, &list_container);
+    let controls = build_controls(&recorder, &list);
     vbox.append(&controls);
-    vbox.append(list_container.as_ref());
+    vbox.append(&list.container);
 
-    rebuild_list(&list_container, &state);
+    list.rebuild();
 
     // Auto-refresh when view becomes visible
-    let list_c = list_container.clone();
-    let state_c = state.clone();
+    let list_c = list.clone();
     stack.connect_visible_child_name_notify(move |s| {
         if s.visible_child_name().as_deref() == Some("meetings") {
-            rebuild_list(&list_c, &state_c);
+            list_c.rebuild();
         }
     });
 
@@ -52,11 +117,7 @@ pub fn build(state: Rc<RefCell<AppState>>, stack: &adw::ViewStack) -> GtkBox {
 }
 
 /// Build recording controls (start/stop + mic toggle + status)
-fn build_controls(
-    state: &Rc<RefCell<AppState>>,
-    recorder: &Rc<RefCell<Option<MeetingRecorder>>>,
-    list_container: &Rc<GtkBox>,
-) -> GtkBox {
+fn build_controls(recorder: &Rc<RefCell<Option<MeetingRecorder>>>, list: &MeetingList) -> GtkBox {
     let controls = GtkBox::new(Orientation::Vertical, 4);
     controls.set_margin_top(8);
     controls.set_margin_start(12);
@@ -72,11 +133,11 @@ fn build_controls(
 
     let mic_toggle = adw::SwitchRow::new();
     mic_toggle.set_title("Microphone");
-    mic_toggle.set_active(state.borrow().settings.meeting_record_mic);
+    mic_toggle.set_active(list.state.borrow().settings.meeting_record_mic);
     mic_toggle.set_width_request(140);
 
     // Persist mic toggle state to disk
-    let state_c = state.clone();
+    let state_c = list.state.clone();
     mic_toggle.connect_active_notify(move |row| {
         state_c.borrow_mut().settings.meeting_record_mic = row.is_active();
         if let Err(e) = state_c.borrow().save() {
@@ -105,22 +166,17 @@ fn build_controls(
 
     // Record button handler
     let recorder_c = recorder.clone();
-    let state_c = state.clone();
     let status_c = status_label.clone();
     let mic_c = mic_toggle.clone();
     let timer_id_c = timer_id.clone();
-    let list_c = list_container.clone();
+    let list_c = list.clone();
 
     record_btn.connect_clicked(move |btn| {
         let is_recording = recorder_c.borrow().is_some();
 
         if is_recording {
             // Stop recording
-            let meeting = {
-                let mut rec = recorder_c.borrow_mut();
-                rec.as_mut().and_then(|r| r.stop().ok())
-            };
-            *recorder_c.borrow_mut() = None;
+            let stopped = recorder_c.borrow_mut().take().map(|mut r| r.stop());
 
             // Stop timer
             if let Some(id) = timer_id_c.borrow_mut().take() {
@@ -132,52 +188,48 @@ fn build_controls(
             btn.add_css_class("suggested-action");
             mic_c.set_sensitive(true);
 
-            if let Some(m) = meeting {
-                let saved = format!(
-                    "{} ({})",
-                    m.title,
-                    MeetingManager::format_duration(m.duration_secs)
-                );
-                status_c.set_text(&match &m.last_error {
-                    Some(problem) => format!("⚠️ Saved with problems: {saved}: {problem}"),
-                    None => format!("✅ Saved: {saved}"),
-                });
+            match stopped {
+                Some(Ok(m)) => {
+                    let saved = format!(
+                        "{} ({})",
+                        m.title,
+                        MeetingManager::format_duration(m.duration_secs)
+                    );
+                    status_c.set_text(&match &m.last_error {
+                        Some(problem) => format!("⚠️ Saved with problems: {saved}: {problem}"),
+                        None => format!("✅ Saved: {saved}"),
+                    });
 
-                // Create OPUS copies in background, the WAVs stay for transcription.
-                // Set Converting status to block Transcribe button during conversion
-                if let Ok(mut meta) = MeetingManager::load(&m.id) {
-                    meta.status = MeetingStatus::Converting;
-                    let _ = MeetingManager::save(&meta);
-                }
+                    // Create OPUS copies in background, the WAVs stay for transcription.
+                    // Set Converting status to block Transcribe button during conversion
+                    MeetingManager::update(&m.id, |meta| meta.status = MeetingStatus::Converting);
 
-                let meeting_id = m.id.clone();
-                let list_cc = list_c.clone();
-                let state_cc = state_c.clone();
-                glib::spawn_future_local(async move {
-                    let id = meeting_id.clone();
-                    let _ = gio::spawn_blocking(move || {
-                        if convert_meeting_to_opus(&id) {
-                            if let Ok(mut m) = MeetingManager::load(&id) {
-                                m.audio_format = "opus".to_string();
+                    let meeting_id = m.id.clone();
+                    let list_cc = list_c.clone();
+                    glib::spawn_future_local(async move {
+                        let id = meeting_id.clone();
+                        let task = gio::spawn_blocking(move || {
+                            let converted = convert_meeting_to_opus(&id);
+                            // Without a converter the WAVs stay, and the meeting is complete anyway.
+                            MeetingManager::update(&id, |m| {
+                                if converted {
+                                    m.audio_format = "opus".to_string();
+                                }
                                 m.status = MeetingStatus::Completed;
-                                let _ = MeetingManager::save(&m);
-                            }
-                        } else {
-                            // No converter available — mark as Completed anyway
-                            if let Ok(mut m) = MeetingManager::load(&id) {
-                                m.status = MeetingStatus::Completed;
-                                let _ = MeetingManager::save(&m);
-                            }
+                            });
+                        })
+                        .await;
+                        if task.is_err() {
+                            tracing::error!("Conversion task failed for {meeting_id}");
                         }
-                    })
-                    .await;
-                    rebuild_list(&list_cc, &state_cc);
-                });
-            } else {
-                status_c.set_text("✅ Recording stopped");
+                        list_cc.rebuild();
+                    });
+                }
+                Some(Err(e)) => status_c.set_text(&format!("❌ Recording not saved: {e:#}")),
+                None => status_c.set_text("✅ Recording stopped"),
             }
 
-            rebuild_list(&list_c, &state_c);
+            list_c.rebuild();
         } else {
             // Start recording
             let record_mic = mic_c.is_active();
@@ -211,7 +263,7 @@ fn build_controls(
                     *timer_id_c.borrow_mut() = Some(id);
                 }
                 Err(e) => {
-                    status_c.set_text(&format!("❌ {}", e));
+                    status_c.set_text(&format!("❌ {e:#}"));
                     status_c.set_visible(true);
                 }
             }
@@ -220,57 +272,88 @@ fn build_controls(
     controls
 }
 
-/// Rebuild the meeting list
-fn rebuild_list(container: &GtkBox, state: &Rc<RefCell<AppState>>) {
-    while let Some(child) = container.first_child() {
-        container.remove(&child);
-    }
-
-    let meetings = MeetingManager::list();
-
-    if meetings.is_empty() {
-        let status = adw::StatusPage::new();
-        status.set_icon_name(Some("media-record-symbolic"));
-        status.set_title("No Meetings Yet");
-        status.set_description(Some("Start a recording to capture meeting audio"));
-
-        let scroll = ScrolledWindow::builder()
-            .hscrollbar_policy(PolicyType::Never)
-            .vscrollbar_policy(PolicyType::Automatic)
-            .vexpand(true)
-            .child(&status)
-            .build();
-        container.append(&scroll);
-    } else {
-        let list = gtk4::ListBox::new();
-        list.set_selection_mode(gtk4::SelectionMode::None);
-        list.add_css_class("boxed-list");
-        list.set_margin_top(8);
-        list.set_margin_bottom(12);
-        list.set_margin_start(12);
-        list.set_margin_end(12);
-
-        for meeting in &meetings {
-            let row = build_meeting_row(meeting, state, container);
-            list.append(&row);
+impl MeetingList {
+    /// Rebuild the rows from the files and the running operations.
+    fn rebuild(&self) {
+        let container = &self.container;
+        while let Some(child) = container.first_child() {
+            container.remove(&child);
         }
 
-        let scroll = ScrolledWindow::builder()
-            .hscrollbar_policy(PolicyType::Never)
-            .vscrollbar_policy(PolicyType::Automatic)
-            .vexpand(true)
-            .child(&list)
-            .build();
+        let meetings = MeetingManager::list();
 
-        container.append(&scroll);
+        if meetings.is_empty() {
+            let status = adw::StatusPage::new();
+            status.set_icon_name(Some("media-record-symbolic"));
+            status.set_title("No Meetings Yet");
+            status.set_description(Some("Start a recording to capture meeting audio"));
+
+            let scroll = ScrolledWindow::builder()
+                .hscrollbar_policy(PolicyType::Never)
+                .vscrollbar_policy(PolicyType::Automatic)
+                .vexpand(true)
+                .child(&status)
+                .build();
+            container.append(&scroll);
+        } else {
+            let list = gtk4::ListBox::new();
+            list.set_selection_mode(gtk4::SelectionMode::None);
+            list.add_css_class("boxed-list");
+            list.set_margin_top(8);
+            list.set_margin_bottom(12);
+            list.set_margin_start(12);
+            list.set_margin_end(12);
+
+            for meeting in &meetings {
+                let row = build_meeting_row(meeting, self);
+                list.append(&row);
+            }
+
+            let scroll = ScrolledWindow::builder()
+                .hscrollbar_policy(PolicyType::Never)
+                .vscrollbar_policy(PolicyType::Automatic)
+                .vexpand(true)
+                .child(&list)
+                .build();
+
+            container.append(&scroll);
+        }
+    }
+
+    /// Run `work` for the claimed meeting on a worker thread. `done` gets the
+    /// failure, if any, before the claim ends and the list shows the result.
+    fn run<T: Send + 'static>(
+        &self,
+        running: Running,
+        work: impl FnOnce() -> anyhow::Result<T> + Send + 'static,
+        done: impl FnOnce(Option<String>) + 'static,
+    ) {
+        let list = self.clone();
+        glib::spawn_future_local(async move {
+            let operation = running.operation.label();
+            let failure = match gio::spawn_blocking(work).await {
+                Ok(Ok(_)) => None,
+                Ok(Err(e)) => Some(format!("{e:#}")),
+                Err(e) => {
+                    tracing::error!("{operation} task panicked: {e:?}");
+                    Some(format!("{operation} task failed"))
+                }
+            };
+            if let Some(failure) = &failure {
+                tracing::error!("{operation} failed for {}: {failure}", running.meeting_id);
+            }
+            done(failure);
+            drop(running);
+            list.rebuild();
+        });
+        self.rebuild();
     }
 }
 
 /// Build a single meeting row: title/subtitle + action buttons
 fn build_meeting_row(
     meeting: &crate::core::meeting::Meeting,
-    state: &Rc<RefCell<AppState>>,
-    container: &GtkBox,
+    list: &MeetingList,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&meeting.title);
@@ -301,17 +384,13 @@ fn build_meeting_row(
         problem
     ));
 
-    row.add_suffix(&build_meeting_actions(meeting, state, container));
+    row.add_suffix(&build_meeting_actions(meeting, list));
     row
 }
 
 /// Build the full action button strip for a meeting row:
 /// play | [transcription controls] | delete
-fn build_meeting_actions(
-    meeting: &crate::core::meeting::Meeting,
-    state: &Rc<RefCell<AppState>>,
-    container: &GtkBox,
-) -> GtkBox {
+fn build_meeting_actions(meeting: &crate::core::meeting::Meeting, list: &MeetingList) -> GtkBox {
     let actions = GtkBox::new(Orientation::Horizontal, 4);
     actions.set_valign(gtk4::Align::Center);
 
@@ -326,7 +405,7 @@ fn build_meeting_actions(
         play_btn.connect_clicked(move |_| {
             if let Some(path) = MeetingManager::find_playback_file(&meeting_id) {
                 if let Err(e) = open_with_system(&path) {
-                    tracing::error!("Failed to open audio: {}", e);
+                    tracing::error!("Failed to open audio: {e:#}");
                 }
             }
         });
@@ -334,13 +413,15 @@ fn build_meeting_actions(
     }
 
     // Status-dependent transcription pipeline buttons
-    actions.append(&build_transcription_controls(meeting, state, container));
+    actions.append(&build_transcription_controls(meeting, list));
 
-    // Recording, conversion and transcription still write to the meeting directory.
-    if matches!(
-        meeting.status,
-        MeetingStatus::Recording | MeetingStatus::Converting | MeetingStatus::Transcribing
-    ) {
+    // Recording, conversion and running operations still write to the meeting directory.
+    if list.operations.running(&meeting.id).is_some()
+        || matches!(
+            meeting.status,
+            MeetingStatus::Recording | MeetingStatus::Converting | MeetingStatus::Transcribing
+        )
+    {
         return actions;
     }
 
@@ -350,8 +431,7 @@ fn build_meeting_actions(
     delete_btn.set_valign(gtk4::Align::Center);
 
     let meeting_id = meeting.id.clone();
-    let state_c = state.clone();
-    let container_c = container.clone();
+    let list_c = list.clone();
 
     delete_btn.connect_clicked(move |btn| {
         let dialog = adw::MessageDialog::new(
@@ -367,15 +447,14 @@ fn build_meeting_actions(
         dialog.set_default_response(Some("cancel"));
 
         let meeting_id_c = meeting_id.clone();
-        let state_cc = state_c.clone();
-        let container_cc = container_c.clone();
+        let list_cc = list_c.clone();
 
         dialog.connect_response(None, move |d, response| {
             if response == "delete" {
                 if let Err(e) = MeetingManager::delete(&meeting_id_c) {
                     tracing::error!("Failed to delete meeting: {}", e);
                 }
-                rebuild_list(&container_cc, &state_cc);
+                list_cc.rebuild();
             }
             d.close();
         });
@@ -389,133 +468,86 @@ fn build_meeting_actions(
 /// Transcribe (Completed) → Analyze (Transcribed) → View (Transcribed | Analyzed)
 fn build_transcription_controls(
     meeting: &crate::core::meeting::Meeting,
-    state: &Rc<RefCell<AppState>>,
-    container: &GtkBox,
+    list: &MeetingList,
 ) -> GtkBox {
     let controls = GtkBox::new(Orientation::Horizontal, 4);
     controls.set_valign(gtk4::Align::Center);
+    let running = list.operations.running(&meeting.id);
 
     // Transcribe button (only if completed, not yet transcribed)
     if meeting.status == MeetingStatus::Completed {
-        let transcribe_btn = Button::from_icon_name("document-edit-symbolic");
-        transcribe_btn.set_tooltip_text(Some("Transcribe"));
-        transcribe_btn.add_css_class("flat");
-        transcribe_btn.set_valign(gtk4::Align::Center);
+        let transcribe_btn = operation_button("document-edit-symbolic", "Transcribe", running);
 
         let meeting_id = meeting.id.clone();
-        let state_c = state.clone();
-        let container_c = container.clone();
+        let list_c = list.clone();
 
         transcribe_btn.connect_clicked(move |btn| {
-            btn.set_sensitive(false);
-            btn.set_tooltip_text(Some("Transcribing..."));
-
             let (stt_provider, stt_key, stt_model) = {
-                let s = state_c.borrow();
+                let s = list_c.state.borrow();
                 (
                     s.settings.stt_provider,
                     s.settings.active_stt_key().to_string(),
                     s.settings.active_stt_model().to_string(),
                 )
             };
-
             if stt_key.is_empty() {
-                btn.set_sensitive(true);
                 btn.set_tooltip_text(Some("Set STT API key in Settings first"));
                 return;
             }
+            let Some(running) = list_c
+                .operations
+                .start(&meeting_id, Operation::Transcription)
+            else {
+                return;
+            };
 
-            if let Ok(mut m) = MeetingManager::load(&meeting_id) {
+            MeetingManager::update(&meeting_id, |m| {
                 m.status = MeetingStatus::Transcribing;
                 m.last_error = None;
-                let _ = MeetingManager::save(&m);
-            }
-
-            let meeting_id_c = meeting_id.clone();
-            let state_cc = state_c.clone();
-            let container_cc = container_c.clone();
-
-            glib::spawn_future_local(async move {
-                let id = meeting_id_c.clone();
-                let result = gio::spawn_blocking(move || {
-                    meeting::transcribe_meeting(&id, stt_provider, &stt_key, &stt_model)
-                        .map_err(|e| e.to_string())
-                })
-                .await;
-
-                let failure = match result {
-                    Ok(Ok(_)) => None,
-                    Ok(Err(e)) => Some(e),
-                    Err(e) => {
-                        tracing::error!("Transcription task failed: {:?}", e);
-                        Some("Transcription task failed".to_string())
-                    }
-                };
-                if let Some(failure) = failure {
-                    tracing::error!("Transcription failed for {}: {}", meeting_id_c, failure);
-                    if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
-                        m.status = MeetingStatus::Completed;
-                        m.last_error = Some(failure);
-                        let _ = MeetingManager::save(&m);
-                    }
-                }
-                rebuild_list(&container_cc, &state_cc);
             });
-            rebuild_list(&container_c, &state_c);
+
+            let id = meeting_id.clone();
+            let failed_id = meeting_id.clone();
+            list_c.run(
+                running,
+                move || meeting::transcribe_meeting(&id, stt_provider, &stt_key, &stt_model),
+                move |failure| {
+                    if let Some(failure) = failure {
+                        MeetingManager::update(&failed_id, |m| {
+                            m.status = MeetingStatus::Completed;
+                            m.last_error = Some(failure);
+                        });
+                    }
+                },
+            );
         });
         controls.append(&transcribe_btn);
     }
 
     // Analyze button (only if transcribed, not yet analyzed)
     if meeting.status == MeetingStatus::Transcribed {
-        let analyze_btn = Button::from_icon_name("starred-symbolic");
-        analyze_btn.set_tooltip_text(Some("Analyze with AI"));
-        analyze_btn.add_css_class("flat");
-        analyze_btn.set_valign(gtk4::Align::Center);
+        let analyze_btn = operation_button("starred-symbolic", "Analyze with AI", running);
 
         let meeting_id = meeting.id.clone();
-        let state_c = state.clone();
-        let container_c = container.clone();
+        let list_c = list.clone();
 
         analyze_btn.connect_clicked(move |btn| {
-            btn.set_sensitive(false);
-
-            let route = state_c.borrow().settings.chat_route(false);
+            let route = list_c.state.borrow().settings.chat_route(false);
             if let Some(missing) = route.missing() {
-                btn.set_sensitive(true);
                 btn.set_tooltip_text(Some(missing));
                 return;
             }
+            let Some(running) = list_c.operations.start(&meeting_id, Operation::Analysis) else {
+                return;
+            };
 
-            let meeting_id_c = meeting_id.clone();
-            let state_cc = state_c.clone();
-            let container_cc = container_c.clone();
-
-            glib::spawn_future_local(async move {
-                let id = meeting_id_c.clone();
-                let result = gio::spawn_blocking(move || {
-                    meeting::analyze_meeting(&id, &route).map_err(|e| e.to_string())
-                })
-                .await;
-
-                let failure = match result {
-                    Ok(Ok(_)) => None,
-                    Ok(Err(e)) => Some(e),
-                    Err(e) => {
-                        tracing::error!("Analysis task failed: {:?}", e);
-                        Some("Analysis task failed".to_string())
-                    }
-                };
-                if let Ok(mut m) = MeetingManager::load(&meeting_id_c) {
-                    if let Some(failure) = &failure {
-                        tracing::error!("Analysis failed: {}", failure);
-                    }
-                    m.last_error = failure;
-                    let _ = MeetingManager::save(&m);
-                }
-
-                rebuild_list(&container_cc, &state_cc);
-            });
+            let id = meeting_id.clone();
+            let done_id = meeting_id.clone();
+            list_c.run(
+                running,
+                move || meeting::analyze_meeting(&id, &route),
+                move |failure| MeetingManager::update(&done_id, |m| m.last_error = failure),
+            );
         });
         controls.append(&analyze_btn);
     }
@@ -555,15 +587,31 @@ fn build_transcription_controls(
     controls
 }
 
+/// A row button that starts an operation. While one runs on the meeting, it shows
+/// that and stays inactive.
+fn operation_button(icon: &str, tooltip: &str, running: Option<Operation>) -> Button {
+    let button = Button::from_icon_name(icon);
+    button.add_css_class("flat");
+    button.set_valign(gtk4::Align::Center);
+    match running {
+        Some(operation) => {
+            button.set_sensitive(false);
+            button.set_tooltip_text(Some(&format!("{} in progress", operation.label())));
+        }
+        None => button.set_tooltip_text(Some(tooltip)),
+    }
+    button
+}
+
 /// Open audio file with the system's default player
-fn open_with_system(path: &std::path::Path) -> Result<(), String> {
+fn open_with_system(path: &std::path::Path) -> anyhow::Result<()> {
     std::process::Command::new("xdg-open")
         .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("xdg-open failed: {}", e))?;
+        .context("xdg-open failed")?;
     Ok(())
 }
 
@@ -605,5 +653,29 @@ fn show_transcript_dialog(parent: Option<&gtk4::Window>, title: &str, content: &
 
     if let Some(w) = parent {
         dialog.present(Some(w));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_meeting_runs_one_operation_at_a_time() {
+        let operations = Operations::default();
+
+        let running = operations.start("m1", Operation::Analysis);
+        assert!(running.is_some());
+        assert!(operations.start("m1", Operation::Analysis).is_none());
+        assert!(operations.start("m1", Operation::Transcription).is_none());
+        assert!(operations.start("m2", Operation::Analysis).is_some());
+        assert!(matches!(
+            operations.running("m1"),
+            Some(Operation::Analysis)
+        ));
+
+        drop(running);
+        assert!(operations.running("m1").is_none());
+        assert!(operations.start("m1", Operation::Analysis).is_some());
     }
 }
