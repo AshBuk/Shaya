@@ -10,14 +10,12 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 /// Audio recorder using PipeWire or PulseAudio
 pub struct AudioRecorder {
     process: Option<Child>,
     output_path: PathBuf,
-    is_recording: Arc<AtomicBool>,
+    is_recording: bool,
 }
 
 impl AudioRecorder {
@@ -26,13 +24,13 @@ impl AudioRecorder {
         Self {
             process: None,
             output_path: PathBuf::new(),
-            is_recording: Arc::new(AtomicBool::new(false)),
+            is_recording: false,
         }
     }
 
     /// Check if recording is in progress
     pub fn is_recording(&self) -> bool {
-        self.is_recording.load(Ordering::SeqCst)
+        self.is_recording
     }
 
     /// Start recording audio into `output_path`
@@ -76,7 +74,7 @@ impl AudioRecorder {
             .with_context(|| format!("Failed to start {cmd}"))?;
 
         self.process = Some(child);
-        self.is_recording.store(true, Ordering::SeqCst);
+        self.is_recording = true;
 
         Ok(())
     }
@@ -100,7 +98,7 @@ impl AudioRecorder {
             let _ = process.wait();
         }
 
-        self.is_recording.store(false, Ordering::SeqCst);
+        self.is_recording = false;
 
         // Verify file exists
         if self.output_path.exists() {

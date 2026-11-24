@@ -13,14 +13,12 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 /// Listen recorder - captures system audio output (monitor source)
 pub struct ListenRecorder {
     process: Option<Child>,
     output_path: PathBuf,
-    is_listening: Arc<AtomicBool>,
+    is_listening: bool,
 }
 
 impl ListenRecorder {
@@ -29,13 +27,13 @@ impl ListenRecorder {
         Self {
             process: None,
             output_path: PathBuf::new(),
-            is_listening: Arc::new(AtomicBool::new(false)),
+            is_listening: false,
         }
     }
 
     /// Check if listening is in progress
     pub fn is_listening(&self) -> bool {
-        self.is_listening.load(Ordering::SeqCst)
+        self.is_listening
     }
 
     /// True when the capture process died while it should still be recording.
@@ -63,7 +61,7 @@ impl ListenRecorder {
             .context("Failed to start listen capture")?;
 
         self.process = Some(child);
-        self.is_listening.store(true, Ordering::SeqCst);
+        self.is_listening = true;
 
         Ok(())
     }
@@ -91,7 +89,7 @@ impl ListenRecorder {
             let _ = process.wait();
         }
 
-        self.is_listening.store(false, Ordering::SeqCst);
+        self.is_listening = false;
 
         if self.output_path.exists() {
             let metadata =
@@ -258,7 +256,7 @@ mod tests {
         ListenRecorder {
             process: Some(spawn_recorder(cmd, args).unwrap()),
             output_path,
-            is_listening: Arc::new(AtomicBool::new(true)),
+            is_listening: true,
         }
     }
 
