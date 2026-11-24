@@ -5,10 +5,10 @@
 
 **AI assistant overlay for Linux with cloud or local models. Native GTK4, Rust, Wayland.**
 
-[![CI](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml/badge.svg)](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/AshBuk/Shaya?sort=semver)](https://github.com/AshBuk/Shaya/releases)
 [![Rust](https://img.shields.io/badge/rust-1.89-orange?logo=rust)](https://www.rust-lang.org)
 [![License](https://img.shields.io/github/license/AshBuk/Shaya)](LICENSE)
+[![CI](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml/badge.svg)](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AshBuk/Shaya?sort=semver)](https://github.com/AshBuk/Shaya/releases)
 
 [![AppImage](https://img.shields.io/badge/AppImage-available-0a7cff?logo=appimage)](https://github.com/AshBuk/Shaya/releases/latest)
 [![AUR](https://img.shields.io/aur/version/shaya?logo=archlinux)](https://aur.archlinux.org/packages/shaya)
@@ -70,21 +70,6 @@ Screenshots reach a local model when it reads images. For llama.cpp that means a
 
 ## ✦ Installation
 
-### Fedora [COPR](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/)
-
-Fedora 44 and newer:
-
-```bash
-sudo dnf copr enable ashbuk/shaya
-sudo dnf install shaya
-```
-
-### Arch Linux [AUR](https://aur.archlinux.org/packages/shaya)
-
-```bash
-yay -S shaya
-```
-
 ### AppImage
 
 Download `Shaya-*-x86_64.AppImage` from [Releases](https://github.com/AshBuk/Shaya/releases/latest) and put it on your `PATH` as `shaya`, so the shortcut command stays the same:
@@ -94,6 +79,19 @@ install -m755 Shaya-*-x86_64.AppImage ~/.local/bin/shaya
 ```
 
 The AppImage carries update information for AppImageUpdate.
+
+### Arch Linux [AUR](https://aur.archlinux.org/packages/shaya)
+
+```bash
+yay -S shaya
+```
+
+### Fedora [COPR](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/)
+
+```bash
+sudo dnf copr enable ashbuk/shaya
+sudo dnf install shaya
+```
 
 Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT.md#system-tools-at-runtime). To build from source, see [DEVELOPMENT](docs/DEVELOPMENT.md#build).
 
