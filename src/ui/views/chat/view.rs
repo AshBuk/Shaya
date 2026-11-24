@@ -6,9 +6,9 @@
 
 //! Chat View UI construction
 //!
-//! Split into two parts for input passthrough:
-//! - `build_content` - read-only content (passthrough area)
-//! - `build_input` - interactive controls (control panel)
+//! Split into two parts:
+//! - `build_content` - transcript and status, a page of the view stack
+//! - `build_input` - composer and controls, in the panel below the stack
 
 use super::messaging::Attachment;
 use super::status::StatusBar;
@@ -96,7 +96,7 @@ impl EmptyState {
     }
 }
 
-/// Build read-only content area (passthrough - clicks pass through)
+/// Build the transcript area.
 /// Returns the widget and shared state needed by `build_input`.
 pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) {
     let vbox = GtkBox::new(Orientation::Vertical, 0);

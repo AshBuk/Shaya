@@ -6,9 +6,9 @@
 
 //! Chat View - AI interaction with Vision + Audio
 //!
-//! Split into two parts for input passthrough:
-//! - `build_content` - read-only area (passthrough)
-//! - `build_input` - interactive controls (receives input)
+//! Split into two parts:
+//! - `build_content` - transcript and status, a page of the view stack
+//! - `build_input` - composer and controls, in the panel below the stack
 
 mod audio;
 mod live;
