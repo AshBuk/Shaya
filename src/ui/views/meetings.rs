@@ -580,16 +580,14 @@ fn show_transcript_dialog(parent: Option<&gtk4::Window>, title: &str, content: &
     let header = adw::HeaderBar::new();
     toolbar_view.add_top_bar(&header);
 
-    let is_dark = gtk4::gdk::Display::default()
-        .map(|d| libadwaita::StyleManager::for_display(&d).is_dark())
-        .unwrap_or(true);
-    let tag_table = markdown::create_tag_table(is_dark);
+    let tag_table = markdown::create_tag_table();
     let buffer = gtk4::TextBuffer::new(Some(&tag_table));
-    markdown::render(&buffer, content);
 
     let text_view = gtk4::TextView::with_buffer(&buffer);
     text_view.set_editable(false);
-    text_view.set_wrap_mode(gtk4::WrapMode::Word);
+    text_view.set_cursor_visible(false);
+    text_view.set_wrap_mode(gtk4::WrapMode::WordChar);
+    markdown::MarkdownView::new(&text_view).render(content);
     text_view.set_margin_top(8);
     text_view.set_margin_bottom(8);
     text_view.set_margin_start(12);

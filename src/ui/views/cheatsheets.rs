@@ -95,20 +95,20 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, paned_pos:
     list.set_margin_end(12);
 
     // Preview area (shared, updated on selection)
-    let is_dark = state.borrow().settings.dark_mode;
-    let tag_table = chat::markdown::create_tag_table(is_dark);
+    let tag_table = chat::markdown::create_tag_table();
     let preview_buffer = gtk4::TextBuffer::new(Some(&tag_table));
     let preview_view = TextView::builder()
         .buffer(&preview_buffer)
         .editable(false)
         .cursor_visible(false)
-        .wrap_mode(gtk4::WrapMode::Word)
+        .wrap_mode(gtk4::WrapMode::WordChar)
         .top_margin(12)
         .bottom_margin(12)
         .left_margin(12)
         .right_margin(12)
         .vexpand(true)
         .build();
+    let preview_md = chat::markdown::MarkdownView::new(&preview_view);
 
     let state_ref = state.borrow();
     for (idx, sheet) in state_ref.cheatsheets.iter().enumerate() {
@@ -196,7 +196,7 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, paned_pos:
 
         // Select first cheatsheet by default for preview
         if idx == 0 {
-            chat::markdown::render(&preview_buffer, &sheet.content);
+            preview_md.render(&sheet.content);
         }
 
         list.append(&row);
@@ -205,13 +205,12 @@ fn rebuild_content(container: &GtkBox, state: &Rc<RefCell<AppState>>, paned_pos:
 
     // Selection change → update markdown preview
     let state_c = state.clone();
-    let preview_buffer_c = preview_buffer.clone();
     list.connect_row_selected(move |_, row| {
         if let Some(row) = row {
             let idx = row.index() as usize;
             let state_ref = state_c.borrow();
             if let Some(sheet) = state_ref.cheatsheets.get(idx) {
-                chat::markdown::render(&preview_buffer_c, &sheet.content);
+                preview_md.render(&sheet.content);
             }
         }
     });

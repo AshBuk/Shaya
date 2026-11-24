@@ -115,20 +115,8 @@ pub fn build_content(state: Rc<RefCell<AppState>>) -> (GtkBox, ChatSharedState) 
     transcript_label.add_css_class("dim-label");
     transcript_label.set_visible(false);
 
-    let is_dark = state.borrow().settings.dark_mode;
-    let tag_table = markdown::create_tag_table(is_dark);
-
-    // Update code tag colors when theme changes at runtime
-    if let Some(display) = gdk::Display::default() {
-        let sm = adw::StyleManager::for_display(&display);
-        let tt = tag_table.clone();
-        sm.connect_dark_notify(move |sm| {
-            markdown::update_theme(&tt, sm.is_dark());
-        });
-    }
-
     let empty = EmptyState::new();
-    let transcript = Transcript::new(&empty.root, tag_table);
+    let transcript = Transcript::new(&empty.root, markdown::create_tag_table());
     vbox.append(transcript.widget());
 
     empty.refresh(&state.borrow().settings);
