@@ -45,14 +45,15 @@
 
 ### System packages
 
-**Fedora:**
-```bash
-sudo dnf install gtk4-devel libadwaita-devel gtk4-layer-shell-devel
-```
+Install [Rust](https://rustup.rs) 1.89 or newer and the system libraries:
 
-**Debian 13+, Ubuntu 25.10+:**
 ```bash
-sudo apt install libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
+# Fedora
+sudo dnf install gcc gtk4-devel libadwaita-devel gtk4-layer-shell-devel
+# Arch
+sudo pacman -S --needed base-devel gtk4 libadwaita gtk4-layer-shell
+# Debian 13+, Ubuntu 25.10+
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```
 
 ---
@@ -68,6 +69,14 @@ sudo apt install libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
 ```bash
 cargo build --release
 ```
+
+### Install from source
+
+```bash
+cargo install --locked --git https://github.com/AshBuk/Shaya
+```
+
+To remove it, run `cargo uninstall shaya`.
 
 ---
 
