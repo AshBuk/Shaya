@@ -348,60 +348,36 @@ fn build_openai_message(msg: &Message, with_image: bool) -> serde_json::Value {
     }
 }
 
-fn cache_control() -> Value {
-    json!({ "type": "ephemeral" })
+/// Mark `block` as a prompt cache breakpoint when `cache` is set.
+fn with_cache(mut block: Value, cache: bool) -> Value {
+    if cache {
+        block["cache_control"] = json!({ "type": "ephemeral" });
+    }
+    block
 }
 
 fn anthropic_system(system_prompt: &str, cache: bool) -> Value {
     if cache {
-        json!([
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": cache_control()
-            }
-        ])
+        json!([anthropic_text_block(system_prompt, true)])
     } else {
         json!(system_prompt)
     }
 }
 
 fn anthropic_text_block(text: &str, cache: bool) -> Value {
-    if cache {
-        json!({
-            "type": "text",
-            "text": text,
-            "cache_control": cache_control()
-        })
-    } else {
-        json!({
-            "type": "text",
-            "text": text
-        })
-    }
+    with_cache(json!({ "type": "text", "text": text }), cache)
 }
 
 fn anthropic_image_block(img: &crate::core::state::ImageData, cache: bool) -> Value {
-    if cache {
-        json!({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img.mime_type,
-                "data": img.base64_data
-            },
-            "cache_control": cache_control()
-        })
-    } else {
-        json!({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": img.mime_type,
-                "data": img.base64_data
-            }
-        })
-    }
+    let block = json!({
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": img.mime_type,
+            "data": img.base64_data
+        }
+    });
+    with_cache(block, cache)
 }
 
 /// Build Anthropic-format message JSON, embedding image as multimodal content if present
