@@ -54,6 +54,7 @@ pub(super) struct LiveRuntime {
     /// Answer now waits for its chunk; a second press must not start another.
     force_pending: bool,
     next_seq: u64,
+    /// Grows with every start, so callbacks left from an earlier run do nothing.
     run_id: u64,
 }
 
@@ -122,7 +123,7 @@ fn start(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>) {
         live.results = ChunkQueue::new(1);
         live.force_pending = false;
         live.next_seq = 1;
-        live.run_id = Utc::now().timestamp_micros() as u64;
+        live.run_id += 1;
     }
 
     set_live_buttons(&ctx, true);

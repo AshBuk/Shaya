@@ -16,8 +16,7 @@ use super::transcript::Transcript;
 use super::{audio, live, markdown, messaging};
 use crate::core::audio::{AudioRecorder, ListenRecorder};
 use crate::core::models::display_name;
-use crate::core::state::{AppState, Conversation, Role, Settings};
-use chrono::Utc;
+use crate::core::state::{AppState, Role, Settings};
 use gtk4::gio;
 use gtk4::prelude::*;
 use gtk4::{
@@ -436,15 +435,8 @@ fn save_to_history(state: &Rc<RefCell<AppState>>, status: &StatusBar) {
         })
         .unwrap_or_else(|| "Untitled".to_string());
 
-    let now = Utc::now();
-    let conversation = Conversation {
-        id: now.timestamp_millis().to_string(),
-        title,
-        messages: state.current_messages.clone(),
-        created_at: now,
-    };
-
-    state.history.push(conversation);
+    let messages = state.current_messages.clone();
+    state.add_conversation(title, messages);
     if let Err(e) = state.save() {
         tracing::error!("Failed to save history: {}", e);
         status.error("Save failed");
