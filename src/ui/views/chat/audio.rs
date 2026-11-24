@@ -8,25 +8,40 @@
 
 use super::messaging::input_text;
 use super::status::StatusBar;
+use super::task::{self, ChatScope};
 use crate::core::api::WhisperClient;
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
 use crate::core::state::AppState;
 use crate::core::utils;
-use gtk4::gio;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Button, TextBuffer};
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// A finished recording, removed once dropped. A failed transcription keeps it
-/// for Retry, and a dismissed error drops it.
-struct Recording(PathBuf);
+/// A finished recording on its way into the input of the chat it was made in.
+/// The file is removed once dropped. A failed transcription keeps it for Retry,
+/// and a dismissed error drops it.
+struct Dictation {
+    path: PathBuf,
+    scope: ChatScope,
+    prefix: Option<&'static str>,
+}
 
-impl Drop for Recording {
+impl Dictation {
+    fn new(path: PathBuf, state: &AppState, prefix: Option<&'static str>) -> Self {
+        Self {
+            path,
+            scope: ChatScope::current(state),
+            prefix,
+        }
+    }
+}
+
+impl Drop for Dictation {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -50,7 +65,8 @@ pub fn handle_audio_click(
             }
         };
 
-        transcribe_and_insert(Recording(audio_path), state, status, input, None);
+        let dictation = Dictation::new(audio_path, &state.borrow(), None);
+        transcribe_and_insert(dictation, state, status, input);
     } else {
         // A new file per recording: the previous one may still be uploading.
         let started = utils::temp_path("voice", "wav")
@@ -86,13 +102,8 @@ pub fn handle_listen_click(
             }
         };
 
-        transcribe_and_insert(
-            Recording(audio_path),
-            state,
-            status,
-            input,
-            Some("🎧 [Heard]: "),
-        );
+        let dictation = Dictation::new(audio_path, &state.borrow(), Some("🎧 [Heard]: "));
+        transcribe_and_insert(dictation, state, status, input);
     } else {
         let started = utils::temp_path("listen", "wav")
             .map_err(Into::into)
@@ -107,14 +118,12 @@ pub fn handle_listen_click(
     }
 }
 
-/// Transcribe audio and insert result into the input
-/// Uses VAD to skip transcription if no speech detected
+/// Transcribe a dictation and append it to the input.
 fn transcribe_and_insert(
-    recording: Recording,
+    dictation: Dictation,
     state: &Rc<RefCell<AppState>>,
     status: &StatusBar,
     input: &TextBuffer,
-    prefix: Option<&'static str>,
 ) {
     let (stt_provider, stt_key, stt_model) = {
         let s = state.borrow();
@@ -126,34 +135,13 @@ fn transcribe_and_insert(
     };
     if stt_key.is_empty() {
         offer_retry(
-            recording,
+            dictation,
             state,
             status,
             input,
-            prefix,
             "Set STT API key in Settings",
         );
         return;
-    }
-
-    // VAD check: skip transcription if no speech detected
-    let vad_config = VadConfig::default();
-    if let Some(vad_result) = analyze_audio_file(&recording.0, &vad_config) {
-        if !vad_result.has_speech {
-            tracing::info!(
-                "VAD: No speech detected (rms={:.4}, peak={:.4})",
-                vad_result.avg_rms,
-                vad_result.peak
-            );
-            status.flash("No speech detected");
-            return;
-        }
-        tracing::info!(
-            "VAD: Speech detected (rms={:.4}, peak={:.4}, duration={:.1}s)",
-            vad_result.avg_rms,
-            vad_result.peak,
-            vad_result.duration_secs
-        );
     }
 
     status.busy("Transcribing…");
@@ -161,62 +149,67 @@ fn transcribe_and_insert(
     let state = state.clone();
     let status = status.clone();
     let input = input.clone();
-    let audio_path = recording.0.clone();
+    let audio_path = dictation.path.clone();
 
     glib::spawn_future_local(async move {
-        let result = gio::spawn_blocking(move || {
-            let client = WhisperClient::new(stt_provider, &stt_key, &stt_model);
-            client.transcribe(&audio_path)
+        let result = task::run(&state, dictation.scope, move || {
+            if !has_speech(&audio_path) {
+                return Ok(None);
+            }
+            WhisperClient::new(stt_provider, &stt_key, &stt_model)
+                .transcribe(&audio_path)
+                .map(Some)
         })
         .await;
 
         match result {
-            Ok(Ok(text)) => {
-                drop(recording);
-                let formatted = match prefix {
-                    Some(p) => format!("{}{}", p, text),
+            None => status.flash("Transcription cancelled: the chat changed"),
+            Some(Ok(None)) => status.flash("No speech detected"),
+            Some(Ok(Some(text))) => {
+                let formatted = match dictation.prefix {
+                    Some(p) => format!("{p}{text}"),
                     None => text,
                 };
                 let current = input_text(&input);
-                let new_text = if current.is_empty() {
+                input.set_text(&if current.is_empty() {
                     formatted
                 } else {
-                    format!("{}\n{}", current, formatted)
-                };
-                input.set_text(&new_text);
+                    format!("{current}\n{formatted}")
+                });
                 status.clear();
             }
-            Ok(Err(e)) => offer_retry(
-                recording,
-                &state,
-                &status,
-                &input,
-                prefix,
-                &format!("{e:#}"),
-            ),
-            Err(e) => offer_retry(
-                recording,
-                &state,
-                &status,
-                &input,
-                prefix,
-                &format!("Transcription failed: {:?}", e),
-            ),
+            Some(Err(e)) => offer_retry(dictation, &state, &status, &input, &format!("{e:#}")),
         }
     });
 }
 
-/// Show the error with a Retry that transcribes the same recording again.
+/// Voice activity check, run on the worker thread: a long WAV takes a while to read.
+/// An unreadable file counts as speech and goes to STT.
+fn has_speech(path: &Path) -> bool {
+    let Some(vad) = analyze_audio_file(path, &VadConfig::default()) else {
+        return true;
+    };
+    tracing::info!(
+        "VAD: speech={} (rms={:.4}, peak={:.4}, duration={:.1}s)",
+        vad.has_speech,
+        vad.avg_rms,
+        vad.peak,
+        vad.duration_secs
+    );
+    vad.has_speech
+}
+
+/// Show the error with a Retry that transcribes the same recording again,
+/// for the chat it was made in.
 fn offer_retry(
-    recording: Recording,
+    dictation: Dictation,
     state: &Rc<RefCell<AppState>>,
     status: &StatusBar,
     input: &TextBuffer,
-    prefix: Option<&'static str>,
     error: &str,
 ) {
     let (state_c, status_c, input_c) = (state.clone(), status.clone(), input.clone());
     status.error_with_retry(error, move || {
-        transcribe_and_insert(recording, &state_c, &status_c, &input_c, prefix);
+        transcribe_and_insert(dictation, &state_c, &status_c, &input_c);
     });
 }

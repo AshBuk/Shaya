@@ -15,6 +15,7 @@ mod live;
 pub mod markdown;
 mod messaging;
 mod status;
+mod task;
 mod transcript;
 mod view;
 

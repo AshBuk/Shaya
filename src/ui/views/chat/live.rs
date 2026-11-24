@@ -8,6 +8,7 @@
 
 use super::messaging::Attachment;
 use super::status::StatusBar;
+use super::task::ChatScope;
 use super::transcript::Transcript;
 use crate::core::api::{ChatOptions, LlmClient, WhisperClient};
 use crate::core::audio::{analyze_audio_file, AudioRecorder, ListenRecorder, VadConfig};
@@ -507,7 +508,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
         (live.run_id, range, transcript_text)
     };
 
-    let (route, system_prompt, mut messages, cache_up_to_message, generation) = {
+    let (route, system_prompt, mut messages, cache_up_to_message, scope) = {
         let state = ctx.state.borrow();
         // Only images that reach the request choose the model. The image model applies
         // to a text-only main model, so the main provider's context decides.
@@ -525,7 +526,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
             live_system_prompt(&state),
             messages,
             cache_up_to_message,
-            state.chat_generation,
+            ChatScope::current(&state),
         )
     };
 
@@ -564,7 +565,7 @@ fn request_answer(ctx: LiveContext, runtime: Rc<RefCell<LiveRuntime>>, manual: b
 
         match result {
             Ok(Ok(response)) => {
-                apply_live_response(ctx, runtime, range, pending_message, response, generation)
+                apply_live_response(ctx, runtime, range, pending_message, response, scope)
             }
             Ok(Err(e)) => {
                 clear_in_flight(&runtime, range);
@@ -584,7 +585,7 @@ fn apply_live_response(
     range: LiveRequestRange,
     pending_message: Message,
     response: String,
-    generation: u64,
+    scope: ChatScope,
 ) {
     let mut reschedule = false;
     {
@@ -598,7 +599,7 @@ fn apply_live_response(
         } else if is_no_suggestion(&response) {
             session.mark_evaluated(range);
             ctx.status.activity("Live · no suggestion");
-        } else if ctx.state.borrow().chat_generation != generation {
+        } else if !scope.is_open(&ctx.state.borrow()) {
             // The chat this answer belongs to was cleared or replaced.
             session.mark_evaluated(range);
             ctx.status.activity("Live · listening");

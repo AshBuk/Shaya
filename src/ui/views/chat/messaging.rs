@@ -7,6 +7,7 @@
 //! Messaging handlers - chat messages and screenshots
 
 use super::status::StatusBar;
+use super::task::{self, ChatScope};
 use super::transcript::{image_texture, Transcript, SCREENSHOT_NOTE, SCREENSHOT_ONLY};
 use crate::core::api::LlmClient;
 use crate::core::capture;
@@ -262,29 +263,27 @@ pub fn send_message(ctx: &ChatContext) {
         None => "Thinking…".to_string(),
     });
 
-    let (messages, generation) = {
+    let (messages, scope) = {
         let state = ctx.state.borrow();
-        (state.current_messages.clone(), state.chat_generation)
+        (state.current_messages.clone(), ChatScope::current(&state))
     };
     let user_message_index = messages.len() - 1;
     let ctx_c = ctx.clone();
 
     glib::spawn_future_local(async move {
-        let result = gio::spawn_blocking(move || {
-            let client = LlmClient::for_route(&route);
-            client.chat(&messages, &system_prompt)
+        let result = task::run(&ctx_c.state, scope, move || {
+            LlmClient::for_route(&route).chat(&messages, &system_prompt)
         })
         .await;
 
         ctx_c.send_btn.set_sensitive(true);
-        // The chat was cleared or replaced while waiting: this result belongs to no open chat.
-        if ctx_c.state.borrow().chat_generation != generation {
-            ctx_c.status.clear();
-            return;
-        }
-
         let failure = match result {
-            Ok(Ok(response)) => {
+            // The chat was cleared or replaced while waiting: the reply belongs to no open chat.
+            None => {
+                ctx_c.status.clear();
+                return;
+            }
+            Some(Ok(response)) => {
                 ctx_c.state.borrow_mut().current_messages.push(Message {
                     role: Role::Assistant,
                     content: response,
@@ -294,11 +293,7 @@ pub fn send_message(ctx: &ChatContext) {
                 ctx_c.status.clear();
                 return;
             }
-            Ok(Err(e)) => format!("{e:#}"),
-            Err(e) => {
-                tracing::error!("Task join error: {:?}", e);
-                "Request failed".to_string()
-            }
+            Some(Err(e)) => format!("{e:#}"),
         };
 
         tracing::error!("API error: {}", failure);
