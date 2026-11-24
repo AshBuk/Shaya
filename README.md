@@ -13,6 +13,8 @@ On Wayland it runs as a compositor overlay.
 
 One Rust binary, pure GTK4.
 
+https://github.com/user-attachments/assets/f784e2ab-19d0-4e37-95b7-e8a60eb7ab86
+
 ## Features
 
 | | |
