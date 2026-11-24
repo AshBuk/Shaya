@@ -5,6 +5,15 @@
 
 **AI assistant overlay for Linux with cloud or local models. Native GTK4, Rust, Wayland.**
 
+[![CI](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml/badge.svg)](https://github.com/AshBuk/Shaya/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AshBuk/Shaya?sort=semver)](https://github.com/AshBuk/Shaya/releases)
+[![Rust](https://img.shields.io/badge/rust-1.89-orange?logo=rust)](https://www.rust-lang.org)
+[![License](https://img.shields.io/github/license/AshBuk/Shaya)](LICENSE)
+
+[![AppImage](https://img.shields.io/badge/AppImage-available-0a7cff?logo=appimage)](https://github.com/AshBuk/Shaya/releases/latest)
+[![AUR](https://img.shields.io/aur/version/shaya?logo=archlinux)](https://aur.archlinux.org/packages/shaya)
+[![COPR](https://img.shields.io/badge/COPR-Fedora-51a2da?logo=fedora)](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/)
+
 </div>
 
 Shaya lives as an overlay on desktop and gives you instant access to AI chat, voice transcription, screenshots, meeting recording & analysis. Use a cloud provider with your own key or a model running on your machine. A fast and quiet tool during deep work.
@@ -31,7 +40,7 @@ https://github.com/user-attachments/assets/f784e2ab-19d0-4e37-95b7-e8a60eb7ab86
 | **Quick Toggle** | Running `shaya` again shows or hides the window, see [OVERLAY_GUIDE](docs/OVERLAY_GUIDE.md#toggle-shortcut) |
 | **Privacy** | BYOK (bring your own key): no account and no Shaya servers. Requests go directly to the provider you choose or to a server you run, everything else stays on your machine |
 | **Models** | Pick from the built-in list or enter any model ID. A text model can pass images to a model of any cloud provider |
-| **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor |
+| **Stealth Mode** | Wayland overlay. Hiding from screen capture depends on the compositor, see [OVERLAY_GUIDE](docs/OVERLAY_GUIDE.md) |
 
 ## Providers
 
@@ -59,37 +68,26 @@ Choose OpenAI-compatible as the provider in Settings and enter the server URL. T
 
 Screenshots reach a local model when it reads images. For llama.cpp that means a server started with `--mmproj`, or a model loaded with `-hf` that ships one. For a text-only model, turn off Reads Images in Settings and screenshots go to the image model of a cloud provider.
 
----
+## ✦ Installation
 
-## Why Shaya Was Built
+### Fedora [COPR](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/)
 
-Most existing AI assistants of that class ship bloated Electron/WebView wrappers that eat RAM and feel alien on Linux.
-
-Shaya is a tool built for Linux users who care about their stack:
-
-- **GTK4 + libadwaita**: GNU/GNOME native, first-class Wayland citizen
-- **Layer Shell**: compositor-level overlay via wlr-layer-shell protocol
-- **Privacy-first**: your API keys stay local and nothing phones home. With a local model, chats never leave your machine
-- **Single binary**
-
-#### Overlay Behavior
-
-Shaya uses Wayland layer-shell to render as a compositor overlay. How it appears during screen sharing depends on your compositor, see the [Overlay Guide](docs/OVERLAY_GUIDE.md) for compositor setup and screen sharing.
-
----
-
-## Install
-
-Fedora 44 and newer, from [COPR](https://copr.fedorainfracloud.org/coprs/ashbuk/shaya/):
+Fedora 44 and newer:
 
 ```bash
 sudo dnf copr enable ashbuk/shaya
 sudo dnf install shaya
 ```
 
-Arch Linux, from the [AUR](https://aur.archlinux.org/packages/shaya): `paru -S shaya` or `yay -S shaya`.
+### Arch Linux [AUR](https://aur.archlinux.org/packages/shaya)
 
-Any distribution: download `Shaya-*-x86_64.AppImage` from [Releases](https://github.com/AshBuk/Shaya/releases/latest) and put it on your `PATH` as `shaya`, so the shortcut command stays the same:
+```bash
+yay -S shaya
+```
+
+### AppImage
+
+Download `Shaya-*-x86_64.AppImage` from [Releases](https://github.com/AshBuk/Shaya/releases/latest) and put it on your `PATH` as `shaya`, so the shortcut command stays the same:
 
 ```bash
 install -m755 Shaya-*-x86_64.AppImage ~/.local/bin/shaya
@@ -97,37 +95,11 @@ install -m755 Shaya-*-x86_64.AppImage ~/.local/bin/shaya
 
 The AppImage carries update information for AppImageUpdate.
 
-### From source
-
-Install [Rust](https://rustup.rs) and the system libraries:
-
-```bash
-# Fedora
-sudo dnf install gcc gtk4-devel libadwaita-devel gtk4-layer-shell-devel
-# Arch
-sudo pacman -S --needed base-devel gtk4 libadwaita gtk4-layer-shell
-# Debian 13+, Ubuntu 25.10+
-sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev libgtk4-layer-shell-dev
-```
-
-Then build and run:
-
-```bash
-cargo install --locked --git https://github.com/AshBuk/Shaya
-shaya
-```
-
-To remove it, run `cargo uninstall shaya`.
-
-Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT.md#system-tools-at-runtime).
-
----
+Audio and screenshots use system tools, listed in [DEVELOPMENT](docs/DEVELOPMENT.md#system-tools-at-runtime). To build from source, see [DEVELOPMENT](docs/DEVELOPMENT.md#build).
 
 ## Recording Other People
 
 Tell the participants before you record a meeting or capture system audio. Laws differ by country, and some require consent from everyone on the call.
-
----
 
 ## Documentation
 
@@ -135,7 +107,7 @@ Tell the participants before you record a meeting or capture system audio. Laws 
 - [ARCHITECTURE](docs/ARCHITECTURE.md): project structure, design decisions, state management
 - [DEVELOPMENT](docs/DEVELOPMENT.md): dependencies, build setup, scripts
 
-### [Apache-2.0](LICENSE) LICENSE
+## ✦ Apache-2.0 [LICENSE](LICENSE)
 
 ---
 
